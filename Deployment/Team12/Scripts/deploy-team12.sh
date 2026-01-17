@@ -158,6 +158,7 @@ MANIFESTS=(
   05-gateway.yaml
   06-game-chess.yaml
   07-ssl-certificate.yaml
+  08-keycloak-bootstrap.yaml
 )
 
 for manifest in "${MANIFESTS[@]}"; do
@@ -409,26 +410,18 @@ fi
 
 echo ""
 
-# Step 7.5: Configure Keycloak Realm & Clients (AUTOMATIC)
-echo -e "${YELLOW}✓ Configuring Keycloak realm and clients (automatic)${NC}"
-if [ -f "$SCRIPT_DIR/configure-keycloak.sh" ]; then
-  # Check if Keycloak pod is ready first
-  if kubectl wait --for=condition=ready pod -l app=keycloak -n bordspelplatform-12 --timeout=300s 2>/dev/null; then
-    # Give Keycloak a few more seconds to initialize fully
-    sleep 5
-    echo -e "${YELLOW}  Running Keycloak configuration...${NC}"
-    if bash "$SCRIPT_DIR/configure-keycloak.sh"; then
-      echo -e "${GREEN}✓ Keycloak configuration completed successfully${NC}"
-    else
-      echo -e "${RED}✗ Keycloak configuration failed${NC}"
-      echo -e "${YELLOW}  You can run manually later with: bash $SCRIPT_DIR/configure-keycloak.sh${NC}"
-    fi
+# Step 7.5: Configure Keycloak Realm & Clients (AUTOMATIC via Job)
+echo -e "${YELLOW}✓ Waiting for Keycloak bootstrap job...${NC}"
+if kubectl get job keycloak-bootstrap -n bordspelplatform-12 >/dev/null 2>&1; then
+  if kubectl wait --for=condition=complete job/keycloak-bootstrap -n bordspelplatform-12 --timeout=600s 2>/dev/null; then
+    echo -e "${GREEN}✓ Keycloak bootstrap completed${NC}"
   else
-    echo -e "${YELLOW}  ⚠ Keycloak not ready yet; will need manual configuration${NC}"
-    echo -e "${YELLOW}  Run later: bash $SCRIPT_DIR/configure-keycloak.sh${NC}"
+    echo -e "${YELLOW}  ⚠ Keycloak bootstrap job not complete yet${NC}"
+    echo -e "${YELLOW}  Check logs: kubectl logs -n bordspelplatform-12 job/keycloak-bootstrap${NC}"
   fi
 else
-  echo -e "${YELLOW}  ✗ configure-keycloak.sh not found${NC}"
+  echo -e "${YELLOW}  ⚠ keycloak-bootstrap job not found; fallback to manual config${NC}"
+  echo -e "${YELLOW}  Run: bash $SCRIPT_DIR/configure-keycloak.sh${NC}"
 fi
 
 echo ""

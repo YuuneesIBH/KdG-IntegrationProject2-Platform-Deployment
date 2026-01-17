@@ -11,8 +11,7 @@ REALM=${REALM:-stoom}
 DOMAIN=${DOMAIN:-stoom-app.com}
 KEYCLOAK_SERVICE=${KEYCLOAK_SERVICE:-keycloak-service}
 KEYCLOAK_PORT=${KEYCLOAK_PORT:-8180}
-# Force /auth context (no root fallback)
-KEYCLOAK_CONTEXT=${KEYCLOAK_CONTEXT:-/auth}
+KEYCLOAK_CONTEXT=${KEYCLOAK_CONTEXT:-}
 
 FRONTEND_CLIENT=stoom-frontend
 BACKEND_CLIENT=stoom-backend
@@ -31,13 +30,46 @@ kc_exec() {
   kubectl exec -n "$NAMESPACE" "$pod" -- bash -c "$*"
 }
 
+resolve_keycloak_context() {
+  local cm_ctx
+  cm_ctx=$(kubectl get configmap platform-config -n "$NAMESPACE" -o jsonpath='{.data.KC_HTTP_RELATIVE_PATH}' 2>/dev/null || true)
+  if [ -n "${cm_ctx:-}" ] && [ "${cm_ctx}" != "null" ]; then
+    KEYCLOAK_CONTEXT="$cm_ctx"
+  fi
+  if [ -n "${KEYCLOAK_CONTEXT}" ] && [ "${KEYCLOAK_CONTEXT:0:1}" != "/" ]; then
+    KEYCLOAK_CONTEXT="/${KEYCLOAK_CONTEXT}"
+  fi
+  if [ "${KEYCLOAK_CONTEXT}" = "/" ]; then
+    KEYCLOAK_CONTEXT=""
+  fi
+}
+
 kc_login() {
   local pod=$1
   local admin_user=$2
   local admin_pass=$3
   local server_url
-  server_url="http://${KEYCLOAK_SERVICE}:${KEYCLOAK_PORT}${KEYCLOAK_CONTEXT}"
-  kc_exec "$pod" "/opt/keycloak/bin/kcadm.sh config credentials --server ${server_url} --realm master --user ${admin_user} --password ${admin_pass}"
+  local tried=()
+  local ctx
+
+  resolve_keycloak_context
+  for ctx in "$KEYCLOAK_CONTEXT" "" "/auth"; do
+    if printf '%s\n' "${tried[@]}" | grep -qx "$ctx"; then
+      continue
+    fi
+    tried+=("$ctx")
+    if [ "$ctx" = "/" ]; then
+      ctx=""
+    fi
+    server_url="http://${KEYCLOAK_SERVICE}:${KEYCLOAK_PORT}${ctx}"
+    if kc_exec "$pod" "/opt/keycloak/bin/kcadm.sh config credentials --server ${server_url} --realm master --user ${admin_user} --password ${admin_pass}"; then
+      KEYCLOAK_CONTEXT="$ctx"
+      return 0
+    fi
+  done
+
+  echo "Failed to authenticate to Keycloak (tried context: ${tried[*]})" >&2
+  return 1
 }
 
 kc() {

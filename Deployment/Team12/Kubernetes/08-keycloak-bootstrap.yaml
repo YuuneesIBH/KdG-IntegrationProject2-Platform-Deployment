@@ -1,0 +1,198 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: keycloak-bootstrap
+  namespace: bordspelplatform-12
+spec:
+  backoffLimit: 4
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+      - name: keycloak-bootstrap
+        image: quay.io/keycloak/keycloak:26.3
+        command: ["/bin/bash", "-c"]
+        args:
+        - |
+          set -euo pipefail
+
+          KC_HOST="${KEYCLOAK_SERVICE:-keycloak-service}"
+          KC_PORT="${KEYCLOAK_PORT:-8180}"
+          REALM="${REALM:-stoom}"
+          DOMAIN="${DOMAIN:-stoom-app.com}"
+          KC_CONTEXT="${KEYCLOAK_CONTEXT:-/auth}"
+
+          if [ -n "$KC_CONTEXT" ] && [ "${KC_CONTEXT:0:1}" != "/" ]; then
+            KC_CONTEXT="/${KC_CONTEXT}"
+          fi
+          if [ "$KC_CONTEXT" = "/" ]; then
+            KC_CONTEXT=""
+          fi
+
+          login() {
+            local server_url=$1
+            /opt/keycloak/bin/kcadm.sh config credentials \
+              --server "${server_url}" \
+              --realm master \
+              --user "${KEYCLOAK_ADMIN}" \
+              --password "${KEYCLOAK_ADMIN_PASSWORD}" \
+              >/dev/null 2>&1
+          }
+
+          echo "Waiting for Keycloak to be ready..."
+          authenticated="false"
+          for _ in $(seq 1 60); do
+            for ctx in "$KC_CONTEXT" "" "/auth"; do
+              server_url="http://${KC_HOST}:${KC_PORT}${ctx}"
+              if login "${server_url}"; then
+                KC_CONTEXT="${ctx}"
+                authenticated="true"
+                break 2
+              fi
+            done
+            sleep 5
+          done
+
+          if [ "${authenticated}" != "true" ]; then
+            echo "Failed to authenticate to Keycloak after waiting."
+            exit 1
+          fi
+
+          kc() {
+            /opt/keycloak/bin/kcadm.sh "$@"
+          }
+
+          get_client_id() {
+            local client=$1
+            kc get clients -r "${REALM}" -q clientId="${client}" --fields id --format csv \
+              | tr -d '\r"' | tail -n1
+          }
+
+          ensure_realm() {
+            if kc get "realms/${REALM}" >/dev/null 2>&1; then
+              echo "Realm ${REALM} already exists, skipping create."
+              return
+            fi
+            echo "Creating realm ${REALM}..."
+            kc create realms -s "realm=${REALM}" -s enabled=true
+            kc update "realms/${REALM}" -s registrationAllowed=true -s loginWithEmailAllowed=true >/dev/null 2>&1 || true
+          }
+
+          ensure_role() {
+            local role=$1
+            if ! kc get "roles/${role}" -r "${REALM}" >/dev/null 2>&1; then
+              kc create roles -r "${REALM}" -s "name=${role}"
+            fi
+          }
+
+          ensure_client_confidential() {
+            local client=$1 redirects_json=$2 origins_json=$3
+            local id
+            id=$(get_client_id "${client}")
+            if [ -z "${id}" ]; then
+              kc create clients -r "${REALM}" \
+                -s "clientId=${client}" \
+                -s protocol=openid-connect \
+                -s publicClient=false \
+                -s serviceAccountsEnabled=true \
+                -s directAccessGrantsEnabled=false \
+                -s standardFlowEnabled=false
+              id=$(get_client_id "${client}")
+            fi
+            kc update "clients/${id}" -r "${REALM}" \
+              -s "redirectUris=${redirects_json}" \
+              -s "webOrigins=${origins_json}"
+            echo "${id}"
+          }
+
+          ensure_client_public() {
+            local client=$1 redirects_json=$2 origins_json=$3
+            local id
+            id=$(get_client_id "${client}")
+            if [ -z "${id}" ]; then
+              kc create clients -r "${REALM}" \
+                -s "clientId=${client}" \
+                -s protocol=openid-connect \
+                -s publicClient=true \
+                -s directAccessGrantsEnabled=false \
+                -s standardFlowEnabled=true \
+                -s 'attributes."pkce.enforced"=true' \
+                -s 'attributes."pkce.code.challenge.method"=S256'
+              id=$(get_client_id "${client}")
+            fi
+            kc update "clients/${id}" -r "${REALM}" \
+              -s "redirectUris=${redirects_json}" \
+              -s "webOrigins=${origins_json}"
+            echo "${id}"
+          }
+
+          set_client_secret() {
+            local id=$1 secret=$2
+            if [ -n "${secret}" ]; then
+              kc update "clients/${id}" -r "${REALM}" -s "secret=${secret}"
+            fi
+          }
+
+          assign_role_to_service_account() {
+            local client=$1 role=$2
+            local uid
+            uid=$(kc get users -r "${REALM}" -q "username=service-account-${client}" --fields id --format csv | tr -d '\r' | tail -n1)
+            [ -z "${uid}" ] && return 0
+            kc add-roles -r "${REALM}" --uid "${uid}" --rolename "${role}" >/dev/null 2>&1 || true
+          }
+
+          REDIRECTS_JSON=$(printf '["https://%s/*"]' "${DOMAIN}")
+          ORIGINS_JSON='["+"]'
+
+          ensure_realm
+          ensure_role "game"
+
+          backend_id=$(ensure_client_confidential "stoom-backend" "${REDIRECTS_JSON}" "${ORIGINS_JSON}")
+          ttt_id=$(ensure_client_confidential "tictactoe-backend" "${REDIRECTS_JSON}" "${ORIGINS_JSON}")
+          chess_id=$(ensure_client_confidential "chess-backend" "${REDIRECTS_JSON}" "${ORIGINS_JSON}")
+          ensure_client_public "stoom-frontend" "${REDIRECTS_JSON}" "${ORIGINS_JSON}" >/dev/null
+
+          set_client_secret "${backend_id}" "${PLATFORM_CLIENT_SECRET}"
+          set_client_secret "${ttt_id}" "${TICTACTOE_CLIENT_SECRET}"
+          set_client_secret "${chess_id}" "${CHESS_CLIENT_SECRET}"
+
+          assign_role_to_service_account "tictactoe-backend" "game"
+          assign_role_to_service_account "chess-backend" "game"
+
+          echo "Keycloak bootstrap completed."
+        env:
+        - name: KEYCLOAK_SERVICE
+          value: keycloak-service
+        - name: KEYCLOAK_PORT
+          value: "8180"
+        - name: REALM
+          value: stoom
+        - name: DOMAIN
+          value: stoom-app.com
+        - name: KEYCLOAK_CONTEXT
+          value: /auth
+        - name: KEYCLOAK_ADMIN
+          valueFrom:
+            secretKeyRef:
+              name: platform-secrets
+              key: KEYCLOAK_ADMIN
+        - name: KEYCLOAK_ADMIN_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: platform-secrets
+              key: KEYCLOAK_ADMIN_PASSWORD
+        - name: PLATFORM_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: platform-secrets
+              key: PLATFORM_CLIENT_SECRET
+        - name: TICTACTOE_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: platform-secrets
+              key: TICTACTOE_CLIENT_SECRET
+        - name: CHESS_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: platform-secrets
+              key: CHESS_CLIENT_SECRET
