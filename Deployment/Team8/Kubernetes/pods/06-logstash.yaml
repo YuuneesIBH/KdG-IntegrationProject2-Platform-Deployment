@@ -1,0 +1,149 @@
+---
+# Logstash Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: logstash-config
+  namespace: bordspelplatform-8
+data:
+  logstash.yml: |
+    http.host: "0.0.0.0"
+    http.port: 9600
+    xpack.monitoring.elasticsearch.hosts: [ "http://elasticsearch-service:9200" ]
+    xpack.monitoring.enabled: false
+  logstash.conf: |
+    input {
+      tcp {
+        port => 5000
+        codec => json
+      }
+      udp {
+        port => 5000
+        codec => json
+      }
+      rabbitmq {
+        host => "rabbitmq-service"
+        port => 5672
+        user => "user"
+        password => "password"
+        queue => "logs"
+        durable => true
+      }
+    }
+    
+    filter {
+      if [type] == "application" {
+        grok {
+          match => { "message" => "%{TIMESTAMP_ISO8601:timestamp} %{LOGLEVEL:loglevel} %{GREEDYDATA:message}" }
+        }
+      }
+    }
+    
+    output {
+      elasticsearch {
+        hosts => ["http://elasticsearch-service:9200"]
+        index => "logstash-%{+YYYY.MM.dd}"
+      }
+      stdout { codec => rubydebug }
+    }
+---
+# Logstash Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: logstash-deployment
+  namespace: bordspelplatform-8
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: logstash
+      tier: logging
+  template:
+    metadata:
+      labels:
+        app: logstash
+        tier: logging
+    spec:
+      containers:
+      - name: logstash
+        image: docker.elastic.co/logstash/logstash:8.15.1
+        ports:
+        - containerPort: 5000
+          name: logs-tcp
+        - containerPort: 5000
+          name: logs-udp
+          protocol: UDP
+        - containerPort: 9600
+          name: monitoring
+        env:
+        - name: LS_JAVA_OPTS
+          value: "-Xms256m -Xmx256m"
+        - name: ELASTICSEARCH_HOSTS
+          value: "http://elasticsearch-service:9200"
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 9600
+          initialDelaySeconds: 60
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 9600
+          initialDelaySeconds: 30
+          periodSeconds: 5
+        volumeMounts:
+        - name: logstash-config
+          mountPath: /usr/share/logstash/config/logstash.yml
+          subPath: logstash.yml
+        - name: logstash-pipeline
+          mountPath: /usr/share/logstash/pipeline/logstash.conf
+          subPath: logstash.conf
+      volumes:
+      - name: logstash-config
+        configMap:
+          name: logstash-config
+          items:
+          - key: logstash.yml
+            path: logstash.yml
+      - name: logstash-pipeline
+        configMap:
+          name: logstash-config
+          items:
+          - key: logstash.conf
+            path: logstash.conf
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: logstash-service
+  namespace: bordspelplatform-8
+  labels:
+    app: logstash
+spec:
+  selector:
+    app: logstash
+    tier: logging
+  ports:
+  - port: 5000
+    targetPort: 5000
+    protocol: TCP
+    name: logs-tcp
+  - port: 5000
+    targetPort: 5000
+    protocol: UDP
+    name: logs-udp
+  - port: 9600
+    targetPort: 9600
+    protocol: TCP
+    name: monitoring
+  type: ClusterIP
+  clusterIP: None

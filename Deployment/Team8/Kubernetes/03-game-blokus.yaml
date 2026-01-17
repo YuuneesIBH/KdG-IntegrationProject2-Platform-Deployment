@@ -1,0 +1,211 @@
+# Blokus Game Frontend
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: blokus-frontend-deployment
+  namespace: bordspelplatform-8
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: blokus-frontend
+  template:
+    metadata:
+      labels:
+        app: blokus-frontend
+    spec:
+      imagePullSecrets:
+      - name: gitlab-registry
+      containers:
+      - name: blokus-frontend
+        image: registry.gitlab.com/kdg-ti/integratieproject-j3/teams-25-26/team8/frontend-blokus/frontend-blokus:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 80
+        env:
+        - name: KEYCLOAK_URL
+          value: "https://dampf-app.com/auth"
+        - name: KEYCLOAK_REALM
+          value: "boardgame-platform"
+        - name: KEYCLOAK_CLIENT_ID
+          value: "react-client"
+        - name: PLATFORM_API_URL
+          value: "/api/platform"
+        - name: GAME_API_URL
+          value: "/api/games"
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 80
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 80
+          initialDelaySeconds: 10
+          periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: blokus-frontend-service
+  namespace: bordspelplatform-8
+spec:
+  selector:
+    app: blokus-frontend
+  ports:
+  - port: 80
+    targetPort: 80
+  type: ClusterIP
+---
+# Blokus Game Backend
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: blokus-backend-deployment
+  namespace: bordspelplatform-8
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: blokus-backend
+  template:
+    metadata:
+      labels:
+        app: blokus-backend
+    spec:
+      imagePullSecrets:
+      - name: gitlab-registry
+      containers:
+      - name: blokus-backend
+        image: registry.gitlab.com/kdg-ti/integratieproject-j3/teams-25-26/team8/backend-game-service/app:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8080
+        env:
+        - name: JAVA_TOOL_OPTIONS
+          value: "-Dserver.port=8080"
+        - name: SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI
+          value: "https://dampf-app.com/auth/realms/boardgame-platform"
+        - name: SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI
+          value: "http://keycloak-service.bordspelplatform-8.svc.cluster.local:8180/auth/realms/boardgame-platform/protocol/openid-connect/certs"
+        - name: SPRING_DATASOURCE_URL
+          value: "jdbc:postgresql://postgres-service.bordspelplatform-8.svc.cluster.local:5432/postgres?currentSchema=backend_blokus"
+        - name: SPRING_JPA_PROPERTIES_HIBERNATE_DEFAULT_SCHEMA
+          value: "backend_blokus"
+        - name: SPRING_DATASOURCE_USERNAME
+          valueFrom:
+            configMapKeyRef:
+              name: platform-config
+              key: DB_USER
+        - name: SPRING_DATASOURCE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: platform-secrets
+              key: DB_PASS
+        - name: SPRING_RABBITMQ_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: platform-config
+              key: RABBIT_HOST
+        - name: SPRING_RABBITMQ_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: platform-config
+              key: RABBIT_PORT
+        - name: SPRING_RABBITMQ_USERNAME
+          valueFrom:
+            configMapKeyRef:
+              name: platform-config
+              key: RABBIT_USER
+        - name: SPRING_RABBITMQ_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: platform-secrets
+              key: RABBIT_PASS
+        - name: AI_SERVICE_URL
+          value: "http://ai-service.bordspelplatform-8.svc.cluster.local:8000"
+        - name: SPRING_JPA_HIBERNATE_DDL_AUTO
+          value: "update"
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "1"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: blokus-backend-service
+  namespace: bordspelplatform-8
+spec:
+  selector:
+    app: blokus-backend
+  ports:
+  - port: 8080
+    targetPort: 8080
+  type: ClusterIP
+---
+# AI Service for Blokus
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ai-service-deployment
+  namespace: bordspelplatform-8
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ai-service
+  template:
+    metadata:
+      labels:
+        app: ai-service
+    spec:
+      containers:
+      - name: ai-service
+        image: matthiastruyzelaerekdg/integratieproject:ai-player
+        ports:
+        - containerPort: 8000
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "200m"
+          limits:
+            memory: "512Mi"
+            cpu: "400m"
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 8000
+          initialDelaySeconds: 10
+          periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ai-service
+  namespace: bordspelplatform-8
+spec:
+  selector:
+    app: ai-service
+  ports:
+  - port: 8000
+    targetPort: 8000
+  type: ClusterIP

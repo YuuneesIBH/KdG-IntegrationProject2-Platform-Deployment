@@ -1,0 +1,75 @@
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: keycloak-create-service-client
+  namespace: bordspelplatform-8
+spec:
+  ttlSecondsAfterFinished: 120
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: setup
+        image: alpine:3.19
+        command: ["sh","-c"]
+        args:
+          - |
+            set -e
+            apk add --no-cache curl jq >/dev/null
+            KC="http://keycloak-service:8180"
+            REALM="boardgame-platform"
+            # Get admin token
+            ADMIN_TOKEN=$(curl -s -X POST "$KC/realms/master/protocol/openid-connect/token" \
+              -H "Content-Type: application/x-www-form-urlencoded" \
+              -d "username=$KEYCLOAK_ADMIN" \
+              -d "password=$KEYCLOAK_ADMIN_PASSWORD" \
+              -d "grant_type=password" \
+              -d "client_id=admin-cli" | jq -r .access_token)
+            if [ -z "$ADMIN_TOKEN" ] || [ "$ADMIN_TOKEN" = "null" ]; then
+              echo "Failed to obtain admin token"; exit 1;
+            fi
+            # Check if client exists
+            CLIENT_ID=$(curl -s -X GET "$KC/admin/realms/$REALM/clients?clientId=platform-service-client" \
+              -H "Authorization: Bearer $ADMIN_TOKEN" | jq -r '.[0].id')
+            if [ "$CLIENT_ID" = "null" ] || [ -z "$CLIENT_ID" ]; then
+              echo "Creating service account client"
+              curl -s -X POST "$KC/admin/realms/$REALM/clients" \
+                -H "Authorization: Bearer $ADMIN_TOKEN" \
+                -H "Content-Type: application/json" \
+                -d "{
+                  \"clientId\": \"platform-service-client\",
+                  \"enabled\": true,
+                  \"serviceAccountsEnabled\": true,
+                  \"clientAuthenticatorType\": \"client-secret\",
+                  \"secret\": \"$PLATFORM_CLIENT_SECRET\",
+                  \"standardFlowEnabled\": false,
+                  \"directAccessGrantsEnabled\": false,
+                  \"publicClient\": false
+                }" -o /dev/null -w "Status: %{http_code}\n"
+            else
+              echo "Client already exists, updating secret"
+              curl -s -X PUT "$KC/admin/realms/$REALM/clients/$CLIENT_ID" \
+                -H "Authorization: Bearer $ADMIN_TOKEN" \
+                -H "Content-Type: application/json" \
+                -d "{
+                  \"serviceAccountsEnabled\": true,
+                  \"secret\": \"$PLATFORM_CLIENT_SECRET\"
+                }" -o /dev/null -w "Status: %{http_code}\n"
+            fi
+        env:
+        - name: KEYCLOAK_ADMIN
+          valueFrom:
+            secretKeyRef:
+              name: platform-secrets
+              key: KEYCLOAK_ADMIN
+        - name: KEYCLOAK_ADMIN_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: platform-secrets
+              key: KEYCLOAK_ADMIN_PASSWORD
+        - name: PLATFORM_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: platform-secrets
+              key: PLATFORM_CLIENT_SECRET

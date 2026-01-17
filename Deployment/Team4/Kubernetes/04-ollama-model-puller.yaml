@@ -1,0 +1,46 @@
+---
+# Job to pull Ollama models after deployment
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ollama-model-puller
+  namespace: ai-platform-team4
+spec:
+  ttlSecondsAfterFinished: 300
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+      - name: model-puller
+        image: curlimages/curl:latest
+        command:
+        - /bin/sh
+        - -c
+        - |
+          echo "Waiting for Ollama to be ready..."
+          sleep 30
+          
+          echo "Pulling embedding model: nomic-embed-text..."
+          curl -X POST http://ollama-service:11434/api/pull \
+            -H "Content-Type: application/json" \
+            -d '{"name": "nomic-embed-text"}'
+          
+          echo ""
+          echo "Pulling LLM model: llama3.2:3b..."
+          curl -X POST http://ollama-service:11434/api/pull \
+            -H "Content-Type: application/json" \
+            -d '{"name": "llama3.2:3b"}'
+          
+          echo ""
+          echo "Models pulled successfully!"
+          
+          # List available models
+          echo "Available models:"
+          curl http://ollama-service:11434/api/tags
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "50m"
+          limits:
+            memory: "128Mi"
+            cpu: "100m"

@@ -1,0 +1,343 @@
+# ==============================================================================
+# ELASTICSEARCH - Data Storage (Real Analytics Stack)
+# ==============================================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: elasticsearch-config
+  namespace: bordspelplatform-12
+data:
+  elasticsearch.yml: |
+    cluster.name: stoom-elasticsearch
+    node.name: elasticsearch-0
+    discovery.type: single-node
+    xpack.license.self_generated.type: basic
+    xpack.security.enabled: false
+    http.host: 0.0.0.0
+    http.port: 9200
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: elasticsearch-deployment
+  namespace: bordspelplatform-12
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: elasticsearch
+  template:
+    metadata:
+      labels:
+        app: elasticsearch
+    spec:
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        fsGroupChangePolicy: Always
+      containers:
+      - name: elasticsearch
+        image: registry.gitlab.com/kdg-ti/integratieproject-j3/teams-25-26/team12/data-analytics/elasticsearch:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 9200
+          name: http
+        - containerPort: 9300
+          name: transport
+        env:
+        - name: node.name
+          value: "elasticsearch"
+        - name: ES_JAVA_OPTS
+          value: "-Xms512m -Xmx512m"
+        - name: discovery.type
+          value: "single-node"
+        - name: xpack.license.self_generated.type
+          value: "basic"
+        - name: xpack.security.enabled
+          value: "false"
+        volumeMounts:
+        - name: elasticsearch-storage
+          mountPath: /usr/share/elasticsearch/data
+        - name: elasticsearch-config
+          mountPath: /usr/share/elasticsearch/config/elasticsearch.yml
+          subPath: elasticsearch.yml
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+        readinessProbe:
+          httpGet:
+            path: /_cluster/health
+            port: 9200
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+      volumes:
+      - name: elasticsearch-storage
+        persistentVolumeClaim:
+          claimName: elasticsearch-pvc
+      - name: elasticsearch-config
+        configMap:
+          name: elasticsearch-config
+      imagePullSecrets:
+      - name: gitlab-registry
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: elasticsearch-pvc
+  namespace: bordspelplatform-12
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+  storageClassName: standard
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: elasticsearch-service
+  namespace: bordspelplatform-12
+spec:
+  selector:
+    app: elasticsearch
+  ports:
+  - port: 9200
+    targetPort: 9200
+    name: http
+  - port: 9300
+    targetPort: 9300
+    name: transport
+  type: ClusterIP
+---
+# ==============================================================================
+# KIBANA - Analytics Dashboard
+# ==============================================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kibana-config
+  namespace: bordspelplatform-12
+data:
+  kibana.yml: |
+    server.name: kibana
+    server.host: "0.0.0.0"
+    server.port: 5601
+    server.basePath: "/kibana"
+    server.rewriteBasePath: true
+    server.publicBaseUrl: "https://stoom-app.com/kibana"
+    elasticsearch.hosts: [ "http://elasticsearch-service:9200" ]
+    monitoring.ui.container.elasticsearch.enabled: true
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kibana-deployment
+  namespace: bordspelplatform-12
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kibana
+  template:
+    metadata:
+      labels:
+        app: kibana
+    spec:
+      containers:
+      - name: kibana
+        image: registry.gitlab.com/kdg-ti/integratieproject-j3/teams-25-26/team12/data-analytics/kibana:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 5601
+          name: http
+        env:
+        - name: SERVER_BASEPATH
+          value: "/kibana"
+        - name: SERVER_REWRITEBASEPATH
+          value: "true"
+        - name: SERVER_PUBLICBASEURL
+          value: "https://stoom-app.com/kibana"
+        - name: ELASTICSEARCH_HOSTS
+          value: "http://elasticsearch-service:9200"
+        volumeMounts:
+        - name: kibana-config
+          mountPath: /usr/share/kibana/config/kibana.yml
+          subPath: kibana.yml
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+        readinessProbe:
+          httpGet:
+            path: /kibana/api/status
+            port: 5601
+          initialDelaySeconds: 60
+          periodSeconds: 10
+          timeoutSeconds: 5
+      volumes:
+      - name: kibana-config
+        configMap:
+          name: kibana-config
+          items:
+          - key: kibana.yml
+            path: kibana.yml
+      imagePullSecrets:
+      - name: gitlab-registry
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kibana-service
+  namespace: bordspelplatform-12
+spec:
+  selector:
+    app: kibana
+  ports:
+  - port: 5601
+    targetPort: 5601
+    name: http
+  type: ClusterIP
+---
+# ==============================================================================
+# LOGSTASH - Event Processing Pipeline from RabbitMQ
+# ==============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: logstash-deployment
+  namespace: bordspelplatform-12
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: logstash
+  template:
+    metadata:
+      labels:
+        app: logstash
+    spec:
+      containers:
+      - name: logstash
+        image: registry.gitlab.com/kdg-ti/integratieproject-j3/teams-25-26/team12/data-analytics/logstash:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 5044
+          name: beats
+        - containerPort: 9600
+          name: monitoring
+        env:
+        - name: LS_JAVA_OPTS
+          value: "-Xms256m -Xmx256m"
+        - name: ELASTICSEARCH_HOST
+          value: "http://elasticsearch-service:9200"
+        - name: RABBIT_HOST
+          value: "rabbitmq-service"
+        - name: RABBIT_PORT
+          value: "5672"
+        - name: RABBIT_USER
+          valueFrom:
+            configMapKeyRef:
+              name: platform-config
+              key: RABBIT_USER
+        - name: RABBIT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: platform-secrets
+              key: RABBIT_PASS
+        - name: RABBIT_QUEUE
+          value: "analytics.queue"
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 9600
+          initialDelaySeconds: 30
+          periodSeconds: 10
+      imagePullSecrets:
+      - name: gitlab-registry
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: logstash-service
+  namespace: bordspelplatform-12
+spec:
+  selector:
+    app: logstash
+  ports:
+  - port: 5044
+    targetPort: 5044
+    name: beats
+  - port: 9600
+    targetPort: 9600
+    name: monitoring
+  type: ClusterIP
+---
+# ==============================================================================
+# ELK-INIT - Setup Pipelines, Transforms, Dashboards + Data Generator
+# ==============================================================================
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: elk-init-job
+  namespace: bordspelplatform-12
+spec:
+  completions: 1
+  parallelism: 1
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        app: elk-init
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: elk-init
+        image: registry.gitlab.com/kdg-ti/integratieproject-j3/teams-25-26/team12/data-analytics/elk-init:latest
+        imagePullPolicy: Always
+        env:
+        - name: ELASTICSEARCH_HOST
+          value: "http://elasticsearch-service:9200"
+        - name: KIBANA_HOST
+          value: "http://kibana-service:5601/kibana"
+        - name: RABBIT_HOST
+          value: "rabbitmq-service"
+        - name: RABBIT_PORT
+          value: "5672"
+        - name: RABBIT_USER
+          valueFrom:
+            configMapKeyRef:
+              name: platform-config
+              key: RABBIT_USER
+        - name: RABBIT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: platform-secrets
+              key: RABBIT_PASS
+        - name: RUN_GENERATOR
+          value: "true"
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+      imagePullSecrets:
+      - name: gitlab-registry

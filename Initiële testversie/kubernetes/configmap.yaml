@@ -1,0 +1,23 @@
+# ConfigMap voor algemene configuratie
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: platform-config
+  namespace: bordspelplatform
+data:
+  # Database configuratie
+  DB_HOST: "postgres-service"
+  DB_PORT: "5432"
+  DB_NAME: "platform_db"
+  
+  # RabbitMQ configuratie
+  RABBITMQ_HOST: "rabbitmq-service"
+  RABBITMQ_PORT: "5672"
+  
+  # Keycloak configuratie
+  KEYCLOAK_URL: "http://keycloak-service:8080"
+  KEYCLOAK_REALM: "bordspelplatform"
+  
+  # Applicatie configuratie
+  LOG_LEVEL: "INFO"
+  ENVIRONMENT: "development"

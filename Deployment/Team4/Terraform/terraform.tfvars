@@ -1,0 +1,10 @@
+project_id       = "ip2-devops4-480317"
+region           = "europe-west1"
+zone             = "europe-west1-b"
+cluster_name     = "ai-platform-team4"
+machine_type     = "e2-standard-4"
+node_count       = 1
+credentials_file = "../../credentials.json"
+network_name     = "ai-network-team4"
+subnet_name      = "ai-subnet-team4"
+db_password      = "team4SecurePass123"

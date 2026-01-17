@@ -1,0 +1,134 @@
+---
+# PostgreSQL Database
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres-deployment
+  namespace: bordspelplatform-12
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+      tier: database
+  template:
+    metadata:
+      labels:
+        app: postgres
+        tier: database
+    spec:
+      containers:
+      - name: postgres
+        image: postgres:17.6-alpine
+        ports:
+        - containerPort: 5432
+          name: postgres
+        env:
+        - name: POSTGRES_USER
+          valueFrom:
+            configMapKeyRef:
+              name: platform-config
+              key: DB_USER
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: platform-secrets
+              key: DB_PASS
+        - name: POSTGRES_DB
+          value: "postgres"
+        - name: PGDATA
+          value: "/var/lib/postgresql/data/pgdata"
+        volumeMounts:
+        - name: postgres-storage
+          mountPath: /var/lib/postgresql/data
+        - name: init-scripts
+          mountPath: /docker-entrypoint-initdb.d
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+        livenessProbe:
+          exec:
+            command:
+            - /bin/sh
+            - -c
+            - pg_isready -U user
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          exec:
+            command:
+            - /bin/sh
+            - -c
+            - pg_isready -U user
+          initialDelaySeconds: 5
+          periodSeconds: 5
+      volumes:
+      - name: postgres-storage
+        persistentVolumeClaim:
+          claimName: postgres-pvc
+      - name: init-scripts
+        configMap:
+          name: postgres-init-scripts
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-service
+  namespace: bordspelplatform-12
+  labels:
+    app: postgres
+spec:
+  selector:
+    app: postgres
+    tier: database
+  ports:
+  - port: 5432
+    targetPort: 5432
+    protocol: TCP
+    name: postgres
+  type: ClusterIP
+  clusterIP: None
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-init-scripts
+  namespace: bordspelplatform-12
+data:
+  01-init.sql: |
+    -- Create databases
+    SELECT 'CREATE DATABASE platform' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'platform')\gexec
+    SELECT 'CREATE DATABASE tictactoe' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'tictactoe')\gexec
+    SELECT 'CREATE DATABASE keycloak' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'keycloak')\gexec
+    
+    -- Create keycloak user
+    DO $$
+    BEGIN
+      IF NOT EXISTS (SELECT FROM pg_user WHERE usename = 'keycloak_user') THEN
+        CREATE USER keycloak_user WITH PASSWORD 'password';
+      END IF;
+    END
+    $$;
+    
+    -- Grant privileges
+    GRANT ALL PRIVILEGES ON DATABASE keycloak TO keycloak_user;
+  02-keycloak-schema.sql: |
+    -- Connect to keycloak database and create schema
+    \c keycloak;
+    CREATE SCHEMA IF NOT EXISTS keycloak_schema;
+    GRANT ALL PRIVILEGES ON SCHEMA keycloak_schema TO keycloak_user;
+    ALTER USER keycloak_user SET search_path TO keycloak_schema;
+  03-app-schemas.sql: |
+    -- Connect to platform database and create schema
+    \c platform;
+    CREATE SCHEMA IF NOT EXISTS platform;
+    GRANT ALL PRIVILEGES ON SCHEMA platform TO CURRENT_USER;
+    
+    -- Connect to tictactoe database and create schema
+    \c tictactoe;
+    CREATE SCHEMA IF NOT EXISTS tictactoe;
+    GRANT ALL PRIVILEGES ON SCHEMA tictactoe TO CURRENT_USER;

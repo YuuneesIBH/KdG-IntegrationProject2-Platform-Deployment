@@ -1,0 +1,96 @@
+:root {
+    --bg-color: #242424;
+    --text-color: rgba(255, 255, 255, 0.87);
+    --primary-btn: #1a1a1a;
+    --primary-btn-hover: #646cff;
+    --input-bg: #333;
+    --input-border: #555;
+    --card-bg: #2a2a2a;
+    --header-bg: #7a7a7a;
+}
+
+body {
+    background-color: var(--bg-color) !important;
+    color: var(--text-color) !important;
+    font-family: system-ui, Avenir, Helvetica, Arial, sans-serif !important;
+}
+
+/* De Login Kaart */
+.pf-c-login__main {
+    background-color: var(--bg-color) !important;
+}
+
+.pf-c-login__main-header,
+.pf-c-login__main-body {
+    background-color: var(--card-bg) !important;
+    border: 1px solid #444;
+    padding: 2rem !important;
+    border-radius: 8px;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+}
+
+/* Titel */
+.pf-c-title {
+    color: white !important;
+    font-size: 2rem !important;
+    text-align: center;
+}
+
+/* Input velden */
+input.pf-c-form-control {
+    background-color: var(--input-bg) !important;
+    border: 1px solid var(--input-border) !important;
+    color: white !important;
+    border-radius: 4px !important;
+}
+
+/* Labels */
+.pf-c-form__label-text {
+    color: #ccc !important;
+}
+
+/* Knoppen (Login) */
+button.pf-c-button.pf-m-primary {
+    background-color: var(--primary-btn) !important;
+    border: 1px solid transparent !important;
+    border-radius: 8px !important;
+    color: white !important;
+    font-weight: 500;
+    padding: 0.6em 1.2em;
+    transition: border-color 0.25s;
+}
+
+button.pf-c-button.pf-m-primary:hover {
+    border-color: var(--primary-btn-hover) !important;
+    background-color: #1a1a1a !important; /* Voorkomt standaard blauw */
+}
+
+/* Header simuleren */
+#kc-header {
+    margin-bottom: 20px;
+    text-align: center;
+    color: var(--primary-btn-hover); /* React blauw/paars */
+    font-weight: bold;
+    font-size: 2.5rem;
+    font-family: 'Courier New', monospace; /* Zoals DAMPF logo */
+    letter-spacing: 0.05em;
+    display: block !important; /* Zorgt dat hij zichtbaar is */
+}
+
+#kc-header-wrapper {
+    display: none; /* Verbergt default tekst */
+}
+
+#kc-header::after {
+    content: "DAMPF PLATFORM";
+}
+
+/* Links (Register, Forgot password) */
+a {
+    color: #646cff !important;
+    text-decoration: none !important;
+}
+
+a:hover {
+    color: #535bf2 !important;
+}

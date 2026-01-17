@@ -1,0 +1,55 @@
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: keycloak-enable-direct-grants
+  namespace: bordspelplatform-8
+spec:
+  ttlSecondsAfterFinished: 120
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: setup
+        image: alpine:3.19
+        command: ["sh","-c"]
+        args:
+          - |
+            set -e
+            apk add --no-cache curl jq >/dev/null
+            KC="http://keycloak-service:8180"
+            REALM="boardgame-platform"
+            CLIENT="react-client"
+            # Get admin token
+            ADMIN_TOKEN=$(curl -s -X POST "$KC/realms/master/protocol/openid-connect/token" \
+              -H "Content-Type: application/x-www-form-urlencoded" \
+              -d "username=$KEYCLOAK_ADMIN" \
+              -d "password=$KEYCLOAK_ADMIN_PASSWORD" \
+              -d "grant_type=password" \
+              -d "client_id=admin-cli" | jq -r .access_token)
+            if [ -z "$ADMIN_TOKEN" ] || [ "$ADMIN_TOKEN" = "null" ]; then
+              echo "Failed to obtain admin token"; exit 1;
+            fi
+            # Get client id
+            CLIENT_ID=$(curl -s -X GET "$KC/admin/realms/$REALM/clients?clientId=$CLIENT" \
+              -H "Authorization: Bearer $ADMIN_TOKEN" | jq -r '.[0].id')
+            if [ -z "$CLIENT_ID" ] || [ "$CLIENT_ID" = "null" ]; then
+              echo "Client $CLIENT not found"; exit 1;
+            fi
+            echo "Enabling Direct Access Grants for $CLIENT"
+            # Update client to enable direct access grants
+            curl -s -X PUT "$KC/admin/realms/$REALM/clients/$CLIENT_ID" \
+              -H "Authorization: Bearer $ADMIN_TOKEN" \
+              -H "Content-Type: application/json" \
+              -d '{"directAccessGrantsEnabled":true}' -o /dev/null -w "Status: %{http_code}\n"
+        env:
+        - name: KEYCLOAK_ADMIN
+          valueFrom:
+            secretKeyRef:
+              name: platform-secrets
+              key: KEYCLOAK_ADMIN
+        - name: KEYCLOAK_ADMIN_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: platform-secrets
+              key: KEYCLOAK_ADMIN_PASSWORD

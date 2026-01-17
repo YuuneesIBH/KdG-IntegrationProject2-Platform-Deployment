@@ -1,0 +1,9 @@
+project_id = "ip2-devops4-480317"
+region          = "europe-west1"
+zone            = "europe-west1-b"
+cluster_name    = "bordspel-platform-team12"
+machine_type    = "e2-standard-2"
+node_count      = 1
+credentials_file = "../../credentials.json"
+network_name    = "bordspel-network-team12"
+subnet_name     = "bordspel-subnet-team12"

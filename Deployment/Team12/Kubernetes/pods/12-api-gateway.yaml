@@ -1,0 +1,211 @@
+---
+# API Gateway / Ingress Controller
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-gateway-deployment
+  namespace: bordspelplatform-12
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: api-gateway
+      tier: gateway
+  template:
+    metadata:
+      labels:
+        app: api-gateway
+        tier: gateway
+    spec:
+      containers:
+      - name: api-gateway
+        image: nginx:1.27.4-alpine
+        ports:
+        - containerPort: 80
+          name: http
+        - containerPort: 8180
+          name: keycloak
+        volumeMounts:
+        - name: nginx-config
+          mountPath: /etc/nginx/nginx.conf
+          subPath: nginx.conf
+        - name: nginx-config
+          mountPath: /etc/nginx/conf.d
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 80
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 80
+          initialDelaySeconds: 5
+          periodSeconds: 5
+      volumes:
+      - name: nginx-config
+        configMap:
+          name: gateway-config
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gateway-config
+  namespace: bordspelplatform-12
+data:
+  nginx.conf: |
+    user nginx;
+    worker_processes auto;
+    error_log /var/log/nginx/error.log warn;
+    pid /var/run/nginx.pid;
+
+    events {
+      worker_connections 1024;
+    }
+
+    http {
+      include /etc/nginx/mime.types;
+      default_type application/octet-stream;
+
+      log_format main '$remote_addr - $remote_user [$time_local] "$request" '
+                      '$status $body_bytes_sent "$http_referer" '
+                      '"$http_user_agent" "$http_x_forwarded_for"';
+
+      access_log /var/log/nginx/access.log main;
+
+      sendfile on;
+      tcp_nopush on;
+      tcp_nodelay on;
+      keepalive_timeout 65;
+      types_hash_max_size 2048;
+
+      include /etc/nginx/conf.d/*.conf;
+    }
+  
+  default.conf: |
+    upstream platform_frontend {
+      server platform-frontend-service:80;
+    }
+
+    upstream platform_backend {
+      server platform-backend-service:8080;
+    }
+
+    upstream tictactoe_backend {
+      server tictactoe-backend-service:8081;
+    }
+
+    upstream keycloak_auth {
+      server keycloak-service:8080;
+    }
+
+    # HTTP to HTTPS redirect
+    server {
+      listen 80;
+      server_name stoom-app.com www.stoom-app.com;
+      return 301 https://$host$request_uri;
+    }
+
+    # HTTPS server
+    server {
+      listen 443 ssl http2;
+      server_name stoom-app.com www.stoom-app.com;
+      client_max_body_size 100M;
+
+      # SSL certificate configuration
+      ssl_certificate /etc/nginx/ssl/tls.crt;
+      ssl_certificate_key /etc/nginx/ssl/tls.key;
+      ssl_protocols TLSv1.2 TLSv1.3;
+      ssl_ciphers HIGH:!aNULL:!MD5;
+      ssl_prefer_server_ciphers on;
+
+      # Keycloak Auth
+      location /auth/ {
+        proxy_pass http://keycloak_auth/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_redirect off;
+      }
+
+      # Public Games Endpoint (no auth required)
+      location = /api/games {
+        proxy_pass http://platform_backend/api/games;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_redirect off;
+      }
+
+      # Platform Backend API
+      location /api/platform/ {
+        proxy_pass http://platform_backend/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_redirect off;
+      }
+
+      # Tic-Tac-Toe Backend API
+      location /api/tictactoe/ {
+        proxy_pass http://tictactoe_backend/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_redirect off;
+      }
+
+      # Play Tic-Tac-Toe
+      location /play/tictactoe/ {
+        proxy_pass http://tictactoe_backend/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_redirect off;
+      }
+
+      # Platform Frontend
+      location / {
+        proxy_pass http://platform_frontend;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_redirect off;
+      }
+    }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api-gateway
+  namespace: bordspelplatform-12
+  labels:
+    app: api-gateway
+spec:
+  selector:
+    app: api-gateway
+    tier: gateway
+  ports:
+  - port: 80
+    targetPort: 80
+    protocol: TCP
+    name: http
+  - port: 8180
+    targetPort: 80
+    protocol: TCP
+    name: keycloak
+  type: LoadBalancer

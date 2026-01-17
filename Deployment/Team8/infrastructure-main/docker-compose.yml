@@ -1,0 +1,188 @@
+# Infrastructure/docker-compose.yml
+services:
+  # De Reverse Proxy (Simuleert Kubernetes Ingress)
+  gateway:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - frontend-platform
+      - frontend-blokus
+      - backend-platform
+      - backend-game
+      - ai-player
+    networks: [app-net]
+
+  # --- FRONTENDS ---
+  frontend-platform:
+    build:
+      context: ../../WebstormProjects/frontend-platform
+      dockerfile: Dockerfile
+    networks: [ app-net ]
+    environment:
+      - KEYCLOAK_URL=http://localhost:8180
+      - KEYCLOAK_REALM=boardgame-platform
+      - KEYCLOAK_CLIENT_ID=react-client
+      - PLATFORM_API_URL=/api/platform
+      - GAME_API_URL=/api/games
+
+  frontend-blokus:
+    build:
+      context: ../../WebstormProjects/frontend-blokus
+      dockerfile: Dockerfile
+    networks: [ app-net ]
+    environment:
+      - KEYCLOAK_URL=http://localhost:8180
+      - KEYCLOAK_REALM=boardgame-platform
+      - KEYCLOAK_CLIENT_ID=react-client
+      - PLATFORM_API_URL=/api/platform
+      - GAME_API_URL=/api/games
+
+  # --- BACKENDS ---
+  backend-platform:
+    build: ../backend-platform-service
+    environment:
+      - JAVA_TOOL_OPTIONS=-Dserver.port=8080
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/postgres?currentSchema=backend_platform
+      - SPRING_JPA_PROPERTIES_HIBERNATE_DEFAULT_SCHEMA=backend_platform
+      - SPRING_DATASOURCE_USERNAME=user
+      - SPRING_DATASOURCE_PASSWORD=password
+      - SPRING_RABBITMQ_HOST=app_rabbitmq
+      - SPRING_RABBITMQ_PORT=5672
+      - SPRING_RABBITMQ_USERNAME=user
+      - SPRING_RABBITMQ_PASSWORD=password
+      - SPRING_RABBITMQ_LISTENER_SIMPLE_DEFAULT_
+      - SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI=http://idp_keycloak:8080/realms/boardgame-platform/protocol/openid-connect/certs
+      - SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI=http://localhost:8180/realms/boardgame-platform
+      - SPRING_JPA_HIBERNATE_DDL_AUTO=update
+    depends_on:
+      postgres:
+        condition: service_healthy
+      app_rabbitmq:
+        condition: service_healthy
+      idp_keycloak:
+        condition: service_started
+    networks: [ app-net ]
+
+  backend-game:
+    build: ../backend-game-service
+    environment:
+      - JAVA_TOOL_OPTIONS=-Dserver.port=8080
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/postgres?currentSchema=backend_tictactoe
+      - SPRING_JPA_PROPERTIES_HIBERNATE_DEFAULT_SCHEMA=backend_tictactoe
+      - SPRING_DATASOURCE_USERNAME=user
+      - SPRING_DATASOURCE_PASSWORD=password
+      - SPRING_RABBITMQ_HOST=app_rabbitmq
+      - SPRING_RABBITMQ_PORT=5672
+      - SPRING_RABBITMQ_USERNAME=user
+      - SPRING_RABBITMQ_PASSWORD=password
+      - SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI=http://idp_keycloak:8080/realms/boardgame-platform/protocol/openid-connect/certs
+      - SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI=http://localhost:8180/realms/boardgame-platform
+      - AI_SERVICE_URL=http://gateway/api/ai
+    depends_on:
+      postgres:
+        condition: service_healthy
+      app_rabbitmq:
+        condition: service_healthy
+      idp_keycloak:
+        condition: service_started
+    networks: [ app-net ]
+
+  # --- INFRASTRUCTUUR MET HEALTHCHECKS ---
+
+  postgres:
+    image: postgres:17.6-alpine
+    restart: always
+    environment:
+      POSTGRES_USER: 'user'
+      POSTGRES_PASSWORD: 'password'
+      POSTGRES_DB: 'postgres'
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "5443:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres-init:/docker-entrypoint-initdb.d
+    networks: [ app-net ]
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U user -d postgres" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  app_rabbitmq:
+    image: rabbitmq:3.13.7-management-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: 'user'
+      RABBITMQ_DEFAULT_PASS: 'password'
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq/
+    networks: [ app-net ]
+    healthcheck:
+      test: [ "CMD", "rabbitmq-diagnostics", "-q", "ping" ]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+
+  # Keycloak Database
+  idp_mysql:
+    image: mysql:9.0.1
+    volumes:
+      - mysql_data:/var/lib/mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: 'root'
+      MYSQL_DATABASE: 'keycloak'
+      MYSQL_USER: 'keycloak'
+      MYSQL_PASSWORD: 'password'
+    ports:
+      - "3307:3306"
+    networks: [app-net]
+
+  idp_keycloak:
+    image: quay.io/keycloak/keycloak:26.3
+    environment:
+      KEYCLOAK_ADMIN: 'admin'
+      KEYCLOAK_ADMIN_PASSWORD: 'admin'
+      KC_DB: 'mysql'
+      KC_DB_URL_HOST: 'idp_mysql'
+      KC_DB_URL_DATABASE: 'keycloak'
+      KC_DB_USERNAME: 'keycloak'
+      KC_DB_PASSWORD: 'password'
+      KC_HOSTNAME_URL: http://localhost:8180
+      KC_HOSTNAME_ADMIN_URL: http://localhost:8180
+      # Belangrijk voor reverse proxy!
+      KC_HOSTNAME: localhost
+      KC_HOSTNAME_PORT: 8180
+      KC_HTTP_ENABLED: true
+      KC_PROXY: edge
+    command: start-dev
+    volumes:
+      - ./themes/platform:/opt/keycloak/themes/platform
+    ports:
+      - "8180:8080" # Keycloak is direct bereikbaar op 8180 voor de browser login
+    depends_on:
+      - idp_mysql
+    networks: [app-net]
+
+  ai-player:
+    image: matthiastruyzelaerekdg/integratieproject:ai-player
+    ports:
+      - '8000:8000'
+    restart: unless-stopped
+    networks: [app-net]
+
+# Definieer het gedeelde netwerk
+networks:
+  app-net:
+    driver: bridge
+
+# Definieer volumes voor persistente data
+volumes:
+  postgres_data:
+  rabbitmq_data:
+  mysql_data:

@@ -1,0 +1,383 @@
+# GitLab CI/CD Pipeline voor Bordspelplatform
+# Deze pipeline bouwt, test en deploy de applicatie naar Kubernetes
+
+stages:
+  - build
+  - test
+  - push
+  - deploy
+
+variables:
+  # Docker image configuratie
+  DOCKER_DRIVER: overlay2
+  DOCKER_TLS_CERTDIR: "/certs"
+  
+  # Google Cloud configuratie
+  GCP_PROJECT_ID: "jouw-project-id"
+  GCP_REGION: "europe-west1"
+  GKE_CLUSTER_NAME: "dev-gke-cluster"
+  
+  # Artifact Registry
+  REGISTRY_URL: "${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/dev-docker-repo"
+  
+  # Image tags
+  IMAGE_TAG: "${CI_COMMIT_SHORT_SHA}"
+  IMAGE_LATEST: "latest"
+
+# Template voor Docker build
+.docker_build_template: &docker_build_template
+  image: docker:24-dind
+  services:
+    - docker:24-dind
+  before_script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+    - echo $GCP_SERVICE_KEY | docker login -u _json_key --password-stdin https://${GCP_REGION}-docker.pkg.dev
+
+# Template voor GCP/GKE configuratie
+.gcp_template: &gcp_template
+  image: google/cloud-sdk:alpine
+  before_script:
+    - echo $GCP_SERVICE_KEY > ${HOME}/gcp-key.json
+    - gcloud auth activate-service-account --key-file ${HOME}/gcp-key.json
+    - gcloud config set project $GCP_PROJECT_ID
+    - gcloud config set compute/region $GCP_REGION
+    - gcloud container clusters get-credentials $GKE_CLUSTER_NAME --region $GCP_REGION
+
+# ============================================================================
+# BUILD STAGE
+# ============================================================================
+
+build:nginx-hello:
+  <<: *docker_build_template
+  stage: build
+  script:
+    - |
+      cat > Dockerfile.nginx <<EOF
+      FROM nginx:alpine
+      COPY index.html /usr/share/nginx/html/
+      EXPOSE 80
+      EOF
+    - |
+      cat > index.html <<EOF
+      <!DOCTYPE html>
+      <html lang="nl">
+      <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Bordspelplatform CI/CD</title>
+          <style>
+              body {
+                  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                  display: flex;
+                  justify-content: center;
+                  align-items: center;
+                  height: 100vh;
+                  margin: 0;
+                  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                  color: white;
+              }
+              .container {
+                  text-align: center;
+                  padding: 2rem;
+                  background: rgba(255, 255, 255, 0.1);
+                  border-radius: 20px;
+                  backdrop-filter: blur(10px);
+                  box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
+              }
+              h1 { font-size: 3rem; margin-bottom: 1rem; }
+              p { font-size: 1.2rem; margin: 0.5rem 0; }
+              .emoji { font-size: 4rem; margin: 1rem 0; }
+              .badge {
+                  display: inline-block;
+                  padding: 0.5rem 1rem;
+                  margin: 0.5rem;
+                  background: rgba(255, 255, 255, 0.2);
+                  border-radius: 10px;
+                  font-size: 0.9rem;
+              }
+          </style>
+      </head>
+      <body>
+          <div class="container">
+              <div class="emoji">🎲 🚀 ✅</div>
+              <h1>Bordspelplatform</h1>
+              <p>CI/CD Pipeline Succesvol!</p>
+              <div class="badge">Build: ${CI_COMMIT_SHORT_SHA}</div>
+              <div class="badge">Branch: ${CI_COMMIT_REF_NAME}</div>
+              <div class="badge">Pipeline: #${CI_PIPELINE_ID}</div>
+          </div>
+      </body>
+      </html>
+      EOF
+    - docker build -f Dockerfile.nginx -t nginx-hello:${IMAGE_TAG} .
+    - docker tag nginx-hello:${IMAGE_TAG} nginx-hello:${IMAGE_LATEST}
+  artifacts:
+    paths:
+      - Dockerfile.nginx
+      - index.html
+    expire_in: 1 day
+  only:
+    - main
+    - develop
+    - merge_requests
+
+# Voorbeeld voor Java Spring Boot applicatie
+build:platform-backend:
+  <<: *docker_build_template
+  stage: build
+  script:
+    - echo "Building Spring Boot application..."
+    # - cd platform-backend
+    # - ./mvnw clean package -DskipTests
+    # - docker build -t platform-backend:${IMAGE_TAG} .
+    - echo "Placeholder - vervang met echte build commando's"
+  only:
+    - main
+    - develop
+
+# Voorbeeld voor React frontend
+build:platform-frontend:
+  image: node:18-alpine
+  stage: build
+  script:
+    - echo "Building React application..."
+    # - cd platform-frontend
+    # - npm ci
+    # - npm run build
+    - echo "Placeholder - vervang met echte build commando's"
+  artifacts:
+    paths:
+      # - platform-frontend/build/
+      - .gitkeep
+    expire_in: 1 day
+  only:
+    - main
+    - develop
+
+# Voorbeeld voor Python AI services
+build:ai-services:
+  image: python:3.11-slim
+  stage: build
+  script:
+    - echo "Building Python AI services..."
+    # - cd ai-services
+    # - pip install -r requirements.txt
+    # - python -m pytest tests/
+    - echo "Placeholder - vervang met echte build commando's"
+  only:
+    - main
+    - develop
+
+# ============================================================================
+# TEST STAGE
+# ============================================================================
+
+test:unit:
+  image: maven:3.9-eclipse-temurin-17
+  stage: test
+  script:
+    - echo "Running unit tests..."
+    # - ./mvnw test
+    - echo "Placeholder - voeg echte tests toe"
+  coverage: '/Total.*?([0-9]{1,3})%/'
+  artifacts:
+    reports:
+      junit: target/surefire-reports/TEST-*.xml
+      coverage_report:
+        coverage_format: cobertura
+        path: target/site/cobertura/coverage.xml
+    when: always
+  only:
+    - main
+    - develop
+    - merge_requests
+
+test:integration:
+  image: maven:3.9-eclipse-temurin-17
+  stage: test
+  services:
+    - postgres:15-alpine
+    - rabbitmq:3-management-alpine
+  variables:
+    POSTGRES_DB: test_db
+    POSTGRES_USER: test_user
+    POSTGRES_PASSWORD: test_password
+  script:
+    - echo "Running integration tests..."
+    # - ./mvnw verify -Pintegration-tests
+    - echo "Placeholder - voeg echte integratietests toe"
+  only:
+    - main
+    - develop
+    - merge_requests
+
+test:security:
+  image: aquasec/trivy:latest
+  stage: test
+  script:
+    - echo "Running security scan..."
+    - trivy image --exit-code 0 --no-progress nginx:alpine
+    - echo "Security scan completed"
+  allow_failure: true
+  only:
+    - main
+    - develop
+
+# ============================================================================
+# PUSH STAGE - Push Docker images naar registry
+# ============================================================================
+
+push:nginx-hello:
+  <<: *docker_build_template
+  stage: push
+  dependencies:
+    - build:nginx-hello
+  script:
+    - docker build -f Dockerfile.nginx -t ${REGISTRY_URL}/nginx-hello:${IMAGE_TAG} .
+    - docker tag ${REGISTRY_URL}/nginx-hello:${IMAGE_TAG} ${REGISTRY_URL}/nginx-hello:${IMAGE_LATEST}
+    - docker push ${REGISTRY_URL}/nginx-hello:${IMAGE_TAG}
+    - docker push ${REGISTRY_URL}/nginx-hello:${IMAGE_LATEST}
+    - echo "Image pushed successfully:"
+    - echo "${REGISTRY_URL}/nginx-hello:${IMAGE_TAG}"
+  only:
+    - main
+    - develop
+
+# ============================================================================
+# DEPLOY STAGE - Deploy naar Kubernetes
+# ============================================================================
+
+deploy:development:
+  <<: *gcp_template
+  stage: deploy
+  environment:
+    name: development
+    url: http://dev.bordspelplatform.nl
+  script:
+    - echo "Deploying to development environment..."
+    
+    # Installeer kubectl als nog niet beschikbaar
+    - apt-get update && apt-get install -y kubectl || true
+    
+    # Verify cluster connection
+    - kubectl cluster-info
+    - kubectl get nodes
+    
+    # Create namespace if not exists
+    - kubectl create namespace bordspelplatform --dry-run=client -o yaml | kubectl apply -f -
+    
+    # Deploy configuratie
+    - kubectl apply -f kubernetes/configmap.yaml
+    - kubectl apply -f kubernetes/secrets.yaml
+    
+    # Deploy infrastructure
+    - kubectl apply -f kubernetes/postgres.yaml
+    - kubectl apply -f kubernetes/rabbitmq.yaml
+    - kubectl apply -f kubernetes/keycloak.yaml
+    
+    # Deploy nginx hello world
+    - |
+      cat > /tmp/nginx-deployment.yaml <<EOF
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: nginx-hello
+        namespace: bordspelplatform
+      spec:
+        replicas: 2
+        selector:
+          matchLabels:
+            app: nginx-hello
+        template:
+          metadata:
+            labels:
+              app: nginx-hello
+              version: "${IMAGE_TAG}"
+          spec:
+            containers:
+            - name: nginx
+              image: ${REGISTRY_URL}/nginx-hello:${IMAGE_TAG}
+              ports:
+              - containerPort: 80
+              resources:
+                requests:
+                  memory: "64Mi"
+                  cpu: "100m"
+                limits:
+                  memory: "128Mi"
+                  cpu: "200m"
+      ---
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: nginx-hello-service
+        namespace: bordspelplatform
+      spec:
+        type: LoadBalancer
+        selector:
+          app: nginx-hello
+        ports:
+        - port: 80
+          targetPort: 80
+      EOF
+    - kubectl apply -f /tmp/nginx-deployment.yaml
+    
+    # Wait for deployment
+    - kubectl rollout status deployment/nginx-hello -n bordspelplatform --timeout=5m
+    
+    # Get service info
+    - kubectl get svc nginx-hello-service -n bordspelplatform
+    - echo "Deployment completed successfully!"
+  only:
+    - develop
+
+deploy:staging:
+  <<: *gcp_template
+  stage: deploy
+  environment:
+    name: staging
+    url: http://staging.bordspelplatform.nl
+  script:
+    - echo "Deploying to staging environment..."
+    - echo "Configure staging-specific settings here"
+    # Vergelijkbaar met development maar met staging configuratie
+  when: manual
+  only:
+    - main
+
+deploy:production:
+  <<: *gcp_template
+  stage: deploy
+  environment:
+    name: production
+    url: https://bordspelplatform.nl
+  script:
+    - echo "Deploying to production environment..."
+    - echo "Use blue-green or canary deployment strategy"
+    # Productie deployment met extra voorzichtigheid
+    - kubectl apply -f kubernetes/ -n bordspelplatform
+    - kubectl rollout status deployment/nginx-hello -n bordspelplatform --timeout=10m
+  when: manual
+  only:
+    - main
+
+# ============================================================================
+# CLEANUP & UTILITIES
+# ============================================================================
+
+cleanup:old-images:
+  <<: *gcp_template
+  stage: deploy
+  script:
+    - echo "Cleaning up old images from Artifact Registry..."
+    # Clean images older than 30 days
+    - |
+      gcloud artifacts docker images list ${REGISTRY_URL} \
+        --filter="CREATE_TIME<$(date -d '30 days ago' --iso-8601)" \
+        --format="get(package)" | while read image; do
+          echo "Deleting old image: $image"
+          gcloud artifacts docker images delete "$image" --quiet || true
+      done
+  when: manual
+  only:
+    - main

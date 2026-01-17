@@ -1,0 +1,15 @@
+# Terraform / OpenTofu
+**/.terraform/
+**/.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+crash.log
+*.log
+
+# Credentials
+credentials.json
+*.key
+*.pem
+*.p12
+*.pfx
+*.env

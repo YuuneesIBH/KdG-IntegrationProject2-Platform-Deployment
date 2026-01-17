@@ -1,0 +1,148 @@
+---
+# Platform Backend
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: platform-backend-deployment
+  namespace: bordspelplatform-8
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: platform-backend
+      tier: backend
+  template:
+    metadata:
+      labels:
+        app: platform-backend
+        tier: backend
+    spec:
+      imagePullSecrets:
+      - name: gitlab-registry
+      containers:
+      - name: platform-backend
+        image: registry.gitlab.com/kdg-ti/integratieproject-j3/teams-25-26/team8/backend-platform-service/app:cd242e14e37deabab948eeb083407ea16ac3c083
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8080
+          name: http
+        env:
+        - name: DB_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: platform-config
+              key: DB_HOST
+        - name: DB_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: platform-config
+              key: DB_PORT
+        - name: DB_USER
+          valueFrom:
+            configMapKeyRef:
+              name: platform-config
+              key: DB_USER
+        - name: DB_PASS
+          valueFrom:
+            secretKeyRef:
+              name: platform-secrets
+              key: DB_PASS
+        - name: DB_NAME
+          value: "platform"
+        - name: RABBIT_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: platform-config
+              key: RABBIT_HOST
+        - name: RABBIT_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: platform-config
+              key: RABBIT_PORT
+        - name: RABBIT_USER
+          valueFrom:
+            configMapKeyRef:
+              name: platform-config
+              key: RABBIT_USER
+        - name: RABBIT_PASS
+          valueFrom:
+            secretKeyRef:
+              name: platform-secrets
+              key: RABBIT_PASS
+        - name: REDIS_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: platform-config
+              key: REDIS_HOST
+        - name: REDIS_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: platform-config
+              key: REDIS_PORT
+        - name: JWK_SET_URI
+          valueFrom:
+            configMapKeyRef:
+              name: platform-config
+              key: JWK_SET_URI
+        - name: TOKEN_URI
+          valueFrom:
+            configMapKeyRef:
+              name: platform-config
+              key: TOKEN_URI
+        - name: GCP_PROJECT_ID
+          valueFrom:
+            configMapKeyRef:
+              name: platform-config
+              key: GCP_PROJECT_ID
+        - name: GCS_BUCKET_NAME
+          valueFrom:
+            configMapKeyRef:
+              name: platform-config
+              key: GCS_BUCKET_NAME
+        - name: GOOGLE_APPLICATION_CREDENTIALS
+          valueFrom:
+            configMapKeyRef:
+              name: platform-config
+              key: GOOGLE_APPLICATION_CREDENTIALS
+        - name: DDL_AUTO
+          valueFrom:
+            configMapKeyRef:
+              name: platform-config
+              key: DDL_AUTO
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /actuator/health
+            port: 8080
+          initialDelaySeconds: 60
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /actuator/health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: platform-backend-service
+  namespace: bordspelplatform-8
+  labels:
+    app: platform-backend
+spec:
+  selector:
+    app: platform-backend
+    tier: backend
+  ports:
+  - port: 8080
+    targetPort: 8080
+    protocol: TCP
+    name: http
+  type: ClusterIP

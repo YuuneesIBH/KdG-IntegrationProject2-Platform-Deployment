@@ -1,0 +1,358 @@
+# PostgreSQL Database
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres-deployment
+  namespace: bordspelplatform-12
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+      - name: postgres
+        image: postgres:17.6-alpine
+        ports:
+        - containerPort: 5432
+        env:
+        - name: POSTGRES_USER
+          valueFrom:
+            configMapKeyRef:
+              name: platform-config
+              key: DB_USER
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: platform-secrets
+              key: DB_PASS
+        - name: POSTGRES_DB
+          value: "postgres"
+        - name: PGDATA
+          value: "/var/lib/postgresql/data/pgdata"
+        volumeMounts:
+        - name: postgres-storage
+          mountPath: /var/lib/postgresql/data
+        - name: init-scripts
+          mountPath: /docker-entrypoint-initdb.d
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+      volumes:
+      - name: postgres-storage
+        persistentVolumeClaim:
+          claimName: postgres-pvc
+      - name: init-scripts
+        configMap:
+          name: postgres-init-scripts
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-init-scripts
+  namespace: bordspelplatform-12
+data:
+  01-init.sql: |
+    -- Create databases
+    SELECT 'CREATE DATABASE platform' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'platform')\gexec
+    SELECT 'CREATE DATABASE tictactoe' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'tictactoe')\gexec
+    SELECT 'CREATE DATABASE chess' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'chess')\gexec
+    SELECT 'CREATE DATABASE keycloak' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'keycloak')\gexec
+    
+    -- Create keycloak user
+    DO $$
+    BEGIN
+      IF NOT EXISTS (SELECT FROM pg_user WHERE usename = 'keycloak_user') THEN
+        CREATE USER keycloak_user WITH PASSWORD 'password';
+      END IF;
+    END
+    $$;
+    
+    -- Grant privileges
+    GRANT ALL PRIVILEGES ON DATABASE keycloak TO keycloak_user;
+  02-keycloak-schema.sql: |
+    -- Connect to keycloak database and create schema
+    \c keycloak;
+    CREATE SCHEMA IF NOT EXISTS keycloak_schema AUTHORIZATION keycloak_user;
+    GRANT ALL ON SCHEMA keycloak_schema TO keycloak_user;
+  03-app-schemas.sql: |
+    -- Connect to postgres database and create app schemas
+    \c postgres;
+    CREATE SCHEMA IF NOT EXISTS platform;
+    GRANT ALL ON SCHEMA platform TO postgres;
+    
+    CREATE SCHEMA IF NOT EXISTS tictactoe;
+    GRANT ALL ON SCHEMA tictactoe TO postgres;
+    
+    CREATE SCHEMA IF NOT EXISTS chess;
+    GRANT ALL ON SCHEMA chess TO postgres;
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-service
+  namespace: bordspelplatform-12
+spec:
+  selector:
+    app: postgres
+  ports:
+  - port: 5432
+    targetPort: 5432
+  type: ClusterIP
+---
+# Redis Cache
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis-deployment
+  namespace: bordspelplatform-12
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      containers:
+      - name: redis
+        image: redis:8.4.0-alpine
+        ports:
+        - containerPort: 6379
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+        livenessProbe:
+          tcpSocket:
+            port: 6379
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          tcpSocket:
+            port: 6379
+          initialDelaySeconds: 5
+          periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-service
+  namespace: bordspelplatform-12
+spec:
+  selector:
+    app: redis
+  ports:
+  - port: 6379
+    targetPort: 6379
+  type: ClusterIP
+---
+# RabbitMQ Message Broker
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rabbitmq-deployment
+  namespace: bordspelplatform-12
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rabbitmq
+  template:
+    metadata:
+      labels:
+        app: rabbitmq
+    spec:
+      hostname: app-rabbitmq
+      containers:
+      - name: rabbitmq
+        image: rabbitmq:3.13.7-management-alpine
+        ports:
+        - containerPort: 5672
+          name: amqp
+        - containerPort: 15672
+          name: management
+        env:
+        - name: RABBITMQ_DEFAULT_USER
+          valueFrom:
+            configMapKeyRef:
+              name: platform-config
+              key: RABBIT_USER
+        - name: RABBITMQ_DEFAULT_PASS
+          valueFrom:
+            secretKeyRef:
+              name: platform-secrets
+              key: RABBIT_PASS
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "200m"
+          limits:
+            memory: "512Mi"
+            cpu: "400m"
+        livenessProbe:
+          exec:
+            command: ["rabbitmq-diagnostics", "ping"]
+          initialDelaySeconds: 90
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 5
+        readinessProbe:
+          exec:
+            command: ["rabbitmq-diagnostics", "ping"]
+          initialDelaySeconds: 60
+          periodSeconds: 10
+          timeoutSeconds: 10
+          failureThreshold: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rabbitmq-service
+  namespace: bordspelplatform-12
+spec:
+  selector:
+    app: rabbitmq
+  ports:
+  - port: 5672
+    targetPort: 5672
+    name: amqp
+  - port: 15672
+    targetPort: 15672
+    name: management
+  type: ClusterIP
+---
+# Keycloak Identity Provider
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: keycloak-deployment
+  namespace: bordspelplatform-12
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: keycloak
+  template:
+    metadata:
+      labels:
+        app: keycloak
+    spec:
+      containers:
+      - name: keycloak
+        image: quay.io/keycloak/keycloak:26.3
+        args: ["start-dev"]
+        ports:
+        - containerPort: 8180
+        env:
+        - name: KEYCLOAK_ADMIN
+          valueFrom:
+            secretKeyRef:
+              name: platform-secrets
+              key: KEYCLOAK_ADMIN
+        - name: KEYCLOAK_ADMIN_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: platform-secrets
+              key: KEYCLOAK_ADMIN_PASSWORD
+        - name: KC_DB
+          valueFrom:
+            configMapKeyRef:
+              name: platform-config
+              key: KC_DB
+        - name: KC_DB_URL
+          valueFrom:
+            configMapKeyRef:
+              name: platform-config
+              key: KC_DB_URL
+        - name: KC_DB_USERNAME
+          valueFrom:
+            configMapKeyRef:
+              name: platform-config
+              key: KC_DB_USERNAME
+        - name: KC_DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: platform-secrets
+              key: KC_DB_PASSWORD
+        - name: KC_PROXY_HEADERS
+          valueFrom:
+            configMapKeyRef:
+              name: platform-config
+              key: KC_PROXY_HEADERS
+        - name: KC_HOSTNAME_STRICT
+          valueFrom:
+            configMapKeyRef:
+              name: platform-config
+              key: KC_HOSTNAME_STRICT
+        - name: KC_HOSTNAME_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: platform-config
+              key: KC_HOSTNAME_PORT
+        - name: KC_HTTP_RELATIVE_PATH
+          valueFrom:
+            configMapKeyRef:
+              name: platform-config
+              key: KC_HTTP_RELATIVE_PATH
+        - name: KC_HTTP_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: platform-config
+              key: KC_HTTP_PORT
+        - name: KC_HTTP_ENABLED
+          valueFrom:
+            configMapKeyRef:
+              name: platform-config
+              key: KC_HTTP_ENABLED
+        - name: KC_HEALTH_ENABLED
+          value: "true"
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 8180
+          initialDelaySeconds: 120
+          periodSeconds: 30
+          timeoutSeconds: 5
+          failureThreshold: 10
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 8180
+          initialDelaySeconds: 90
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 12
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: keycloak-service
+  namespace: bordspelplatform-12
+spec:
+  selector:
+    app: keycloak
+  ports:
+  - port: 8180
+    targetPort: 8180
+  type: ClusterIP

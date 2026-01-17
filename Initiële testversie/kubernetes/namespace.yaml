@@ -1,0 +1,8 @@
+# Namespace voor alle bordspelplatform resources
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: bordspelplatform
+  labels:
+    name: bordspelplatform
+    environment: development

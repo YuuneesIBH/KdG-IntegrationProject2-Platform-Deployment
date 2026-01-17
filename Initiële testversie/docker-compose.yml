@@ -1,0 +1,106 @@
+# Docker Compose - Initiële Testversie
+# Simpele "Hello World" setup om infrastructuur te testen
+# Geen volledige applicatie - alleen basis container images
+
+version: '3.8'
+
+services:
+  # ============================================================================
+  # Test Application 1 - Nginx Hello World (Main Platform Demo)
+  # ============================================================================
+  nginx-platform:
+    image: nginx:alpine
+    container_name: test-platform-frontend
+    ports:
+      - "8080:80"
+    volumes:
+      - ./nginx/html:/usr/share/nginx/html:ro
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - test-network
+
+  # ============================================================================
+  # Test Application 2 - Apache Hello World (Spel Demo)
+  # ============================================================================
+  apache-game:
+    image: httpd:alpine
+    container_name: test-game-service
+    ports:
+      - "8081:80"
+    volumes:
+      - ./nginx/html/game.html:/usr/local/apache2/htdocs/index.html:ro
+    networks:
+      - test-network
+
+  # ============================================================================
+  # Test Backend - Simple Python HTTP Server
+  # ============================================================================
+  python-backend:
+    image: python:3.11-slim
+    container_name: test-backend-api
+    ports:
+      - "8082:8000"
+    working_dir: /app
+    command: python -m http.server 8000
+    volumes:
+      - ./nginx/html:/app:ro
+    networks:
+      - test-network
+
+  # ============================================================================
+  # Database Test - PostgreSQL (voor database connectivity test)
+  # ============================================================================
+  postgres:
+    image: postgres:15-alpine
+    container_name: test-database
+    environment:
+      POSTGRES_DB: testdb
+      POSTGRES_USER: testuser
+      POSTGRES_PASSWORD: testpass
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./init-scripts:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U testuser"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - test-network
+
+  # ============================================================================
+  # Message Queue Test - RabbitMQ
+  # ============================================================================
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: test-messagequeue
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    ports:
+      - "5672:5672"    # AMQP
+      - "15672:15672"  # Management UI
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - test-network
+
+# ============================================================================
+# Networks
+# ============================================================================
+networks:
+  test-network:
+    driver: bridge
+    name: bordspel-test-network
+
+# ============================================================================
+# Note: Volumes verwijderd - geen data persistence nodig voor test
+# ============================================================================

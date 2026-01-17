@@ -1,0 +1,197 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: platform-frontend-deployment
+  namespace: bordspelplatform-8
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: platform-frontend
+  template:
+    metadata:
+      labels:
+        app: platform-frontend
+    spec:
+      imagePullSecrets:
+      - name: gitlab-registry
+      containers:
+      - name: platform-frontend
+        image: registry.gitlab.com/kdg-ti/integratieproject-j3/teams-25-26/team8/frontend/frontend-platform:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 80
+        env:
+        # Public Keycloak host
+        - name: KEYCLOAK_URL
+          value: "https://dampf-app.com/auth"
+        - name: KEYCLOAK_REALM
+          value: "boardgame-platform"
+        - name: KEYCLOAK_CLIENT_ID
+          value: "react-client"
+        # API routes
+        - name: PLATFORM_API_URL
+          value: "/api/platform"
+        - name: GAME_API_URL
+          value: "/api/games"
+        # Game frontend URLs (for iframe embedding)
+        - name: BLOKUS_FRONTEND_URL
+          value: "/blokus"
+        - name: VITE_BLOKUS_URL
+          value: "/blokus"
+        - name: REACT_APP_BLOKUS_URL
+          value: "/blokus"
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 80
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 80
+          initialDelaySeconds: 10
+          periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: platform-frontend-service
+  namespace: bordspelplatform-8
+spec:
+  selector:
+    app: platform-frontend
+  ports:
+  - port: 80
+    targetPort: 80
+  type: ClusterIP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: platform-backend-deployment
+  namespace: bordspelplatform-8
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: platform-backend
+  template:
+    metadata:
+      labels:
+        app: platform-backend
+    spec:
+      imagePullSecrets:
+      - name: gitlab-registry
+      containers:
+      - name: platform-backend
+        image: registry.gitlab.com/kdg-ti/integratieproject-j3/teams-25-26/team8/backend-platform-service/app:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8080
+        env:
+        # Allow Spring to auto-configure Resource Server (JwtDecoder)
+        - name: JAVA_TOOL_OPTIONS
+          value: "-Dserver.port=8080 -Dserver.address=0.0.0.0"
+        - name: SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_AUDIENCES
+          value: "account,platform-backend"
+        - name: SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_AUDIENCE_VALIDATOR_ENABLED
+          value: "false"
+        - name: PUBLIC_ENDPOINTS
+          value: "/api/platform/store/games"
+        # Keycloak Admin API for username updates
+        - name: KEYCLOAK_ADMIN_SERVER_URL
+          value: "http://keycloak-service.bordspelplatform-8.svc.cluster.local:8180/auth"
+        - name: KEYCLOAK_ADMIN_REALM
+          value: "boardgame-platform"
+        - name: KEYCLOAK_ADMIN_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: platform-secrets
+              key: KEYCLOAK_ADMIN
+        - name: KEYCLOAK_ADMIN_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: platform-secrets
+              key: KEYCLOAK_ADMIN_PASSWORD
+        - name: SPRING_DATASOURCE_URL
+          value: "jdbc:postgresql://postgres-service.bordspelplatform-8.svc.cluster.local:5432/postgres?currentSchema=backend_platform"
+        - name: SPRING_JPA_PROPERTIES_HIBERNATE_DEFAULT_SCHEMA
+          value: "backend_platform"
+        - name: SPRING_DATASOURCE_USERNAME
+          valueFrom:
+            configMapKeyRef:
+              name: platform-config
+              key: DB_USER
+        - name: SPRING_DATASOURCE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: platform-secrets
+              key: DB_PASS
+        - name: SPRING_RABBITMQ_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: platform-config
+              key: RABBIT_HOST
+        - name: SPRING_RABBITMQ_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: platform-config
+              key: RABBIT_PORT
+        - name: SPRING_RABBITMQ_USERNAME
+          valueFrom:
+            configMapKeyRef:
+              name: platform-config
+              key: RABBIT_USER
+        - name: SPRING_RABBITMQ_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: platform-secrets
+              key: RABBIT_PASS
+        - name: SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI
+          valueFrom:
+            configMapKeyRef:
+              name: platform-config
+              key: JWK_SET_URI
+        - name: SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI
+          value: "https://dampf-app.com/auth/realms/boardgame-platform"
+        - name: SPRING_JPA_HIBERNATE_DDL_AUTO
+          value: "update"
+        - name: STRIPE_SUCCESS_URL
+          valueFrom:
+            configMapKeyRef:
+              name: platform-config
+              key: STRIPE_SUCCESS_URL
+        - name: STRIPE_CANCEL_URL
+          valueFrom:
+            configMapKeyRef:
+              name: platform-config
+              key: STRIPE_CANCEL_URL
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "1"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: platform-backend-service
+  namespace: bordspelplatform-8
+spec:
+  selector:
+    app: platform-backend
+  ports:
+  - port: 8080
+    targetPort: 8080
+  type: ClusterIP

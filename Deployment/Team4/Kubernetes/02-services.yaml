@@ -1,0 +1,172 @@
+---
+# Chatbot and Recommendation System (RAG API)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: chatbot-rag-deployment
+  namespace: ai-platform-team4
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: chatbot-rag
+  template:
+    metadata:
+      labels:
+        app: chatbot-rag
+    spec:
+      imagePullSecrets:
+      - name: gitlab-registry-chatbot
+      containers:
+      - name: chatbot-rag
+        image: registry.gitlab.com/kdg-ti/integratieproject-j3/teams-25-26/team4/chatbot-and-recommendation-system:latest
+        ports:
+        - containerPort: 8000
+        env:
+        # PostgreSQL Configuration (exact names required by Pydantic)
+        - name: POSTGRES_USER
+          value: "raguser"
+        - name: POSTGRES_PASSWORD
+          value: "team4SecurePass123"
+        - name: POSTGRES_DB
+          value: "ragdb"
+        - name: POSTGRES_HOST
+          value: "postgres-service"
+        - name: POSTGRES_PORT
+          value: "5432"
+        # Ollama Configuration
+        - name: OLLAMA_BASE_URL
+          value: "http://ollama-service:11434"
+        - name: CHAT_MODEL
+          value: "llama3.2:3b"
+        - name: EMBEDDING_MODEL
+          value: "nomic-embed-text"
+        - name: KEEP_ALIVE
+          value: "300"
+        # RAG Configuration
+        - name: CHUNK_SIZE
+          value: "1000"
+        - name: CHUNK_SIZE_MIN
+          value: "100"
+        - name: CHUNK_OVERLAP
+          value: "200"
+        - name: RETRIEVER_K
+          value: "5"
+        - name: DATA_PATH
+          value: "/app/data"
+        - name: MAX_FILE_SIZE
+          value: "10485760"
+        # CORS
+        - name: ALLOWED_ORIGINS
+          value: "*"
+        # Rate limiting
+        - name: RATE_LIMIT_CHAT
+          value: "10"
+        - name: RATE_LIMIT_CHAT_WINDOW
+          value: "60"
+        - name: RATE_LIMIT_UPLOAD
+          value: "5"
+        - name: RATE_LIMIT_UPLOAD_WINDOW
+          value: "60"
+        - name: RATE_LIMIT_DEFAULT
+          value: "100"
+        - name: RATE_LIMIT_DEFAULT_WINDOW
+          value: "60"
+        # Logging
+        - name: LOG_LEVEL
+          value: "INFO"
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+        # Using TCP probe since /health endpoint may not exist
+        livenessProbe:
+          tcpSocket:
+            port: 8000
+          initialDelaySeconds: 60
+          periodSeconds: 15
+          failureThreshold: 10
+        readinessProbe:
+          tcpSocket:
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: chatbot-rag-service
+  namespace: ai-platform-team4
+spec:
+  selector:
+    app: chatbot-rag
+  ports:
+  - port: 8000
+    targetPort: 8000
+  type: ClusterIP
+---
+# AI Player Service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ai-player-deployment
+  namespace: ai-platform-team4
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ai-player
+  template:
+    metadata:
+      labels:
+        app: ai-player
+    spec:
+      imagePullSecrets:
+      - name: gitlab-registry
+      containers:
+      - name: ai-player
+        image: registry.gitlab.com/kdg-ti/integratieproject-j3/teams-25-26/team4/ai-player:latest
+        ports:
+        - containerPort: 8000
+        env:
+        - name: HOST
+          value: "0.0.0.0"
+        - name: PORT
+          value: "8000"
+        - name: LOG_LEVEL
+          value: "INFO"
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "250m"
+        # Using TCP probe since /health endpoint may not exist
+        livenessProbe:
+          tcpSocket:
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 15
+          failureThreshold: 10
+        readinessProbe:
+          tcpSocket:
+            port: 8000
+          initialDelaySeconds: 15
+          periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ai-player-service
+  namespace: ai-platform-team4
+spec:
+  selector:
+    app: ai-player
+  ports:
+  - port: 8000
+    targetPort: 8000
+  type: ClusterIP

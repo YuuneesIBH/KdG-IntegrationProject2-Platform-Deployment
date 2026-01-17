@@ -1,0 +1,164 @@
+# Nginx "Hello World" Deployment - Voorbeeld deployment voor CI/CD testing
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-hello
+  namespace: bordspelplatform
+  labels:
+    app: nginx-hello
+    component: frontend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: nginx-hello
+  template:
+    metadata:
+      labels:
+        app: nginx-hello
+        component: frontend
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:alpine
+        ports:
+        - containerPort: 80
+          name: http
+        volumeMounts:
+        - name: nginx-config
+          mountPath: /usr/share/nginx/html
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "100m"
+          limits:
+            memory: "128Mi"
+            cpu: "200m"
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 80
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 80
+          initialDelaySeconds: 5
+          periodSeconds: 5
+      volumes:
+      - name: nginx-config
+        configMap:
+          name: nginx-html
+---
+# Nginx ConfigMap met HTML content
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-html
+  namespace: bordspelplatform
+data:
+  index.html: |
+    <!DOCTYPE html>
+    <html lang="nl">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Bordspelplatform - Hello World</title>
+        <style>
+            body {
+                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                height: 100vh;
+                margin: 0;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                color: white;
+            }
+            .container {
+                text-align: center;
+                padding: 2rem;
+                background: rgba(255, 255, 255, 0.1);
+                border-radius: 20px;
+                backdrop-filter: blur(10px);
+                box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
+            }
+            h1 {
+                font-size: 3rem;
+                margin-bottom: 1rem;
+            }
+            p {
+                font-size: 1.2rem;
+                margin: 0.5rem 0;
+            }
+            .emoji {
+                font-size: 4rem;
+                margin: 1rem 0;
+            }
+            .info {
+                margin-top: 2rem;
+                font-size: 0.9rem;
+                opacity: 0.8;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="emoji">🎲 🎮 🎯</div>
+            <h1>Bordspelplatform</h1>
+            <p>Hello World! 👋</p>
+            <p>Kubernetes Deployment Succesvol!</p>
+            <div class="info">
+                <p>Deployment: nginx-hello</p>
+                <p>Namespace: bordspelplatform</p>
+                <p>Environment: Development</p>
+            </div>
+        </div>
+    </body>
+    </html>
+---
+# Nginx Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-hello-service
+  namespace: bordspelplatform
+  labels:
+    app: nginx-hello
+spec:
+  type: LoadBalancer
+  ports:
+  - port: 80
+    targetPort: 80
+    protocol: TCP
+    name: http
+  selector:
+    app: nginx-hello
+---
+# Horizontal Pod Autoscaler voor Nginx
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: nginx-hello-hpa
+  namespace: bordspelplatform
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: nginx-hello
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80

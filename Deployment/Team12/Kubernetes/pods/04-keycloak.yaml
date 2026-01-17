@@ -1,0 +1,125 @@
+---
+# Keycloak Identity Provider
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: keycloak-deployment
+  namespace: bordspelplatform-12
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: keycloak
+  template:
+    metadata:
+      labels:
+        app: keycloak
+    spec:
+      containers:
+      - name: keycloak
+        image: quay.io/keycloak/keycloak:26.3
+        args: ["start-dev"]
+        ports:
+        - containerPort: 8180
+          name: http
+        env:
+        - name: KEYCLOAK_ADMIN
+          valueFrom:
+            secretKeyRef:
+              name: platform-secrets
+              key: KEYCLOAK_ADMIN
+        - name: KEYCLOAK_ADMIN_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: platform-secrets
+              key: KEYCLOAK_ADMIN_PASSWORD
+        - name: KC_DB
+          valueFrom:
+            configMapKeyRef:
+              name: platform-config
+              key: KC_DB
+        - name: KC_DB_URL
+          valueFrom:
+            configMapKeyRef:
+              name: platform-config
+              key: KC_DB_URL
+        - name: KC_DB_USERNAME
+          valueFrom:
+            configMapKeyRef:
+              name: platform-config
+              key: KC_DB_USERNAME
+        - name: KC_DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: platform-secrets
+              key: KC_DB_PASSWORD
+        - name: KC_PROXY_HEADERS
+          valueFrom:
+            configMapKeyRef:
+              name: platform-config
+              key: KC_PROXY_HEADERS
+        - name: KC_HOSTNAME_STRICT
+          valueFrom:
+            configMapKeyRef:
+              name: platform-config
+              key: KC_HOSTNAME_STRICT
+        - name: KC_HOSTNAME_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: platform-config
+              key: KC_HOSTNAME_PORT
+        - name: KC_HTTP_RELATIVE_PATH
+          valueFrom:
+            configMapKeyRef:
+              name: platform-config
+              key: KC_HTTP_RELATIVE_PATH
+        - name: KC_HTTP_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: platform-config
+              key: KC_HTTP_PORT
+        - name: KC_HTTP_ENABLED
+          valueFrom:
+            configMapKeyRef:
+              name: platform-config
+              key: KC_HTTP_ENABLED
+        - name: KC_HEALTH_ENABLED
+          value: "true"
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 8180
+          initialDelaySeconds: 120
+          periodSeconds: 30
+          timeoutSeconds: 5
+          failureThreshold: 10
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 8180
+          initialDelaySeconds: 90
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 12
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: keycloak-service
+  namespace: bordspelplatform-12
+  labels:
+    app: keycloak
+spec:
+  selector:
+    app: keycloak
+  ports:
+  - port: 8180
+    targetPort: 8180
+  type: ClusterIP

@@ -1,0 +1,250 @@
+---
+# API Gateway / Ingress Controller
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-gateway-deployment
+  namespace: bordspelplatform-8
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: api-gateway
+      tier: gateway
+  template:
+    metadata:
+      labels:
+        app: api-gateway
+        tier: gateway
+    spec:
+      containers:
+      - name: api-gateway
+        image: nginx:1.27.4-alpine
+        ports:
+        - containerPort: 80
+          name: http
+        - containerPort: 8180
+          name: keycloak
+        volumeMounts:
+        # nginx.conf mounten is niet nodig, alleen default.conf
+        - name: nginx-config
+          mountPath: /etc/nginx/conf.d/default.conf
+          subPath: default.conf
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 80
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 80
+          initialDelaySeconds: 5
+          periodSeconds: 5
+      volumes:
+      - name: nginx-config
+        configMap:
+          name: gateway-config
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gateway-config
+  namespace: bordspelplatform-8
+data:
+  nginx.conf: |
+    user nginx;
+    worker_processes auto;
+    error_log /var/log/nginx/error.log warn;
+    pid /var/run/nginx.pid;
+
+    events {
+      worker_connections 1024;
+    }
+
+    http {
+      include /etc/nginx/mime.types;
+      default_type application/octet-stream;
+
+      log_format main '$remote_addr - $remote_user [$time_local] "$request" '
+                      '$status $body_bytes_sent "$http_referer" '
+                      '"$http_user_agent" "$http_x_forwarded_for"';
+
+      access_log /var/log/nginx/access.log main;
+
+      sendfile on;
+      tcp_nopush on;
+      tcp_nodelay on;
+      keepalive_timeout 65;
+      types_hash_max_size 2048;
+
+      include /etc/nginx/conf.d/*.conf;
+    }
+  
+  default.conf: |
+    upstream platform_frontend {
+      server platform-frontend-service:80;
+    }
+
+    upstream platform_backend {
+      server platform-backend-service:8080;
+    }
+
+    upstream platform_proxy {
+      server platform-proxy-service:8081;
+    }
+
+    upstream blokus_backend {
+      server blokus-backend-service:8080;
+    }
+
+    upstream blokus_backend_unauth {
+      server blokus-backend-service:8080;
+    }
+
+    upstream keycloak_auth {
+      server keycloak-service:8180;
+    }
+
+    server {
+      listen 80;
+      server_name _;
+      client_max_body_size 100M;
+
+      # Keycloak Admin Console
+      location /admin/ {
+        proxy_pass http://keycloak_auth/admin/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_redirect off;
+      }
+
+      # Keycloak Auth - redirect to public hostname
+      location /auth/ {
+        return 301 https://auth.dampf-app.com$request_uri;
+      }
+
+      # Keycloak Realms (OIDC endpoints) - redirect to public hostname
+      location /realms/ {
+        return 301 https://auth.dampf-app.com$request_uri;
+      }
+
+      # Keycloak static resources
+      location /resources/ {
+        proxy_pass http://keycloak_auth/resources/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_redirect off;
+      }
+
+      location /js/ {
+        proxy_pass http://keycloak_auth/js/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_redirect off;
+      }
+
+      # Public store endpoint via proxy (no auth required)
+      location = /api/platform/store/games {
+        proxy_pass http://platform_proxy/store/games;
+        add_header X-Route "platform-proxy" always;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_redirect off;
+      }
+
+      # Game Backend API (frontend expects /api/games) - MUST be before /api/platform/
+      # Inject a mock JWT token to bypass Spring Security for unsigned requests
+      location ~ ^/api/games/ {
+        proxy_pass http://blokus_backend;
+        add_header X-Route "blokus-backend" always;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        # Always add a Bearer token - prevents 401 from Spring Security
+        proxy_set_header Authorization "Bearer mock-token";
+        proxy_redirect off;
+      }
+
+      # Blokus Backend API (legacy path)
+      location ~ ^/api/blokus/ {
+        proxy_pass http://blokus_backend;
+        add_header X-Route "blokus-backend" always;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_redirect off;
+      }
+
+      # Platform Backend API
+      location /api/platform/ {
+        rewrite ^/api/platform/(.*) /api/$1 break;
+        proxy_pass http://platform_backend/;
+        add_header X-Route "platform-backend" always;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_redirect off;
+      }
+
+      # Play Blokus
+      location /play/blokus/ {
+        proxy_pass http://blokus_backend/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_redirect off;
+      }
+
+      # Platform Frontend
+      location / {
+        proxy_pass http://platform_frontend;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_redirect off;
+      }
+    }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api-gateway
+  namespace: bordspelplatform-8
+  labels:
+    app: api-gateway
+spec:
+  selector:
+    app: api-gateway
+    tier: gateway
+  ports:
+  - port: 80
+    targetPort: 80
+    protocol: TCP
+    name: http
+  - port: 8180
+    targetPort: 80
+    protocol: TCP
+    name: keycloak
+  type: LoadBalancer

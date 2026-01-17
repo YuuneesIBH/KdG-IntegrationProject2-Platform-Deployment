@@ -1,0 +1,118 @@
+# Logstash Deployment voor ELK Stack
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: logstash
+  namespace: bordspelplatform
+  labels:
+    app: logstash
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: logstash
+  template:
+    metadata:
+      labels:
+        app: logstash
+    spec:
+      containers:
+      - name: logstash
+        image: docker.elastic.co/logstash/logstash:8.11.0
+        ports:
+        - containerPort: 5044
+          name: beats
+        - containerPort: 9600
+          name: monitoring
+        env:
+        - name: ELASTICSEARCH_HOSTS
+          value: "http://elasticsearch-service:9200"
+        - name: RABBITMQ_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: platform-config
+              key: RABBITMQ_HOST
+        volumeMounts:
+        - name: logstash-config
+          mountPath: /usr/share/logstash/pipeline
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
+      volumes:
+      - name: logstash-config
+        configMap:
+          name: logstash-config
+---
+# Logstash ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: logstash-config
+  namespace: bordspelplatform
+data:
+  logstash.conf: |
+    input {
+      rabbitmq {
+        host => "${RABBITMQ_HOST}"
+        port => 5672
+        queue => "analytics-events"
+        user => "guest"
+        password => "guest"
+        durable => true
+        codec => json
+      }
+    }
+    
+    filter {
+      # Parse JSON events
+      json {
+        source => "message"
+      }
+      
+      # Add timestamp
+      date {
+        match => ["timestamp", "ISO8601"]
+        target => "@timestamp"
+      }
+      
+      # Add fields voor analytics
+      mutate {
+        add_field => {
+          "platform" => "bordspelplatform"
+        }
+      }
+    }
+    
+    output {
+      elasticsearch {
+        hosts => ["${ELASTICSEARCH_HOSTS}"]
+        index => "platform-analytics-%{+YYYY.MM.dd}"
+      }
+      
+      # Debug output (optioneel)
+      stdout {
+        codec => rubydebug
+      }
+    }
+---
+# Logstash Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: logstash-service
+  namespace: bordspelplatform
+  labels:
+    app: logstash
+spec:
+  type: ClusterIP
+  ports:
+  - port: 5044
+    targetPort: 5044
+    protocol: TCP
+    name: beats
+  selector:
+    app: logstash

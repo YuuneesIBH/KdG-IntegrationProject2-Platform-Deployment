@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bordspelplatform - Initiële Test</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            min-height: 100vh;
+            padding: 2rem;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        .header {
+            text-align: center;
+            margin-bottom: 3rem;
+        }
+        
+        .header h1 {
+            font-size: 3.5rem;
+            margin-bottom: 1rem;
+        }
+        
+        .emoji {
+            font-size: 5rem;
+            margin: 1.5rem 0;
+        }
+        
+        .status {
+            display: inline-block;
+            padding: 0.75rem 2rem;
+            background: rgba(34, 197, 94, 0.4);
+            border: 3px solid #22c55e;
+            border-radius: 25px;
+            font-size: 1.4rem;
+            margin-top: 1rem;
+            font-weight: bold;
+        }
+        
+        .subtitle {
+            font-size: 1.3rem;
+            margin-top: 1rem;
+            opacity: 0.95;
+        }
+        
+        .services {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 1.5rem;
+            margin-top: 2rem;
+        }
+        
+        .service-card {
+            background: rgba(255, 255, 255, 0.15);
+            border-radius: 20px;
+            padding: 2rem;
+            backdrop-filter: blur(15px);
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+            transition: all 0.3s ease;
+            border: 2px solid rgba(255, 255, 255, 0.2);
+        }
+        
+        .service-card:hover {
+            transform: translateY(-8px);
+            box-shadow: 0 15px 50px rgba(0, 0, 0, 0.4);
+            border-color: rgba(255, 255, 255, 0.4);
+        }
+        
+        .service-card h3 {
+            font-size: 1.6rem;
+            margin-bottom: 0.75rem;
+        }
+        
+        .service-card p {
+            margin-bottom: 0.75rem;
+            opacity: 0.95;
+            line-height: 1.5;
+        }
+        
+        .port {
+            color: #ffd700;
+            font-weight: bold;
+            font-size: 1.2rem;
+        }
+        
+        .service-card a {
+            display: inline-block;
+            padding: 0.6rem 1.2rem;
+            background: rgba(255, 255, 255, 0.25);
+            color: white;
+            text-decoration: none;
+            border-radius: 10px;
+            transition: all 0.3s ease;
+            font-weight: 600;
+            margin-top: 0.5rem;
+        }
+        
+        .service-card a:hover {
+            background: rgba(255, 255, 255, 0.4);
+            transform: scale(1.05);
+        }
+        
+        .info {
+            margin-top: 3rem;
+            text-align: center;
+            background: rgba(255, 255, 255, 0.15);
+            padding: 2.5rem;
+            border-radius: 20px;
+            border: 2px solid rgba(255, 255, 255, 0.2);
+        }
+        
+        .info h2 {
+            margin-bottom: 1.5rem;
+            font-size: 2rem;
+        }
+        
+        .commands {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 1.5rem;
+            border-radius: 15px;
+            margin-top: 1.5rem;
+            text-align: left;
+            max-width: 700px;
+            margin-left: auto;
+            margin-right: auto;
+            font-family: 'Courier New', monospace;
+        }
+        
+        .commands p {
+            padding: 0.5rem;
+            margin: 0.5rem 0;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            border-left: 4px solid #22c55e;
+        }
+        
+        .badge {
+            display: inline-block;
+            padding: 0.4rem 0.8rem;
+            background: rgba(255, 215, 0, 0.3);
+            border: 2px solid #ffd700;
+            border-radius: 10px;
+            font-size: 0.9rem;
+            margin: 0.25rem;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="emoji">🎲 🧪 ✅</div>
+            <h1>Bordspelplatform</h1>
+            <p class="subtitle">Initiële Testversie - Infrastructure Proof of Concept</p>
+            <div class="status">🚀 Test Infrastructure Running!</div>
+            <div style="margin-top: 1.5rem;">
+                <span class="badge">Docker Compose</span>
+                <span class="badge">Kubernetes Ready</span>
+                <span class="badge">CI/CD Ready</span>
+            </div>
+        </div>
+        
+        <div class="services">
+            <div class="service-card">
+                <h3>🌐 Platform Frontend</h3>
+                <p>Nginx test container - Main interface</p>
+                <p class="port">Port: 8080</p>
+                <p><strong>Container:</strong> test-platform-frontend</p>
+                <p style="font-size: 0.9rem; opacity: 0.8;">Je bekijkt deze pagina nu! ✓</p>
+            </div>
+            
+            <div class="service-card">
+                <h3>🎮 Game Service</h3>
+                <p>Apache test container - Spel demo</p>
+                <p class="port">Port: 8081</p>
+                <p><strong>Container:</strong> test-game-service</p>
+                <a href="http://localhost:8081" target="_blank">Test Game Service →</a>
+            </div>
+            
+            <div class="service-card">
+                <h3>⚙️ Backend API</h3>
+                <p>Python HTTP server - API demo</p>
+                <p class="port">Port: 8082</p>
+                <p><strong>Container:</strong> test-backend-api</p>
+                <a href="http://localhost:8082" target="_blank">Test Backend →</a>
+            </div>
+            
+            <div class="service-card">
+                <h3>🗄️ PostgreSQL</h3>
+                <p>Database connectivity test</p>
+                <p class="port">Port: 5432</p>
+                <p><strong>DB:</strong> testdb (testuser/testpass)</p>
+                <p style="font-size: 0.9rem; opacity: 0.8;">Test data geladen ✓</p>
+            </div>
+            
+            <div class="service-card">
+                <h3>🐰 RabbitMQ</h3>
+                <p>Message queue test</p>
+                <p class="port">AMQP: 5672 | UI: 15672</p>
+                <p><strong>Login:</strong> guest/guest</p>
+                <a href="http://localhost:15672" target="_blank">Open Management UI →</a>
+            </div>
+        </div>
+        
+        <div class="info">
+            <h2>📋 Test Commands</h2>
+            <div class="commands">
+                <p><strong>▶ Start:</strong> docker-compose up -d</p>
+                <p><strong>📊 Status:</strong> docker-compose ps</p>
+                <p><strong>📝 Logs:</strong> docker-compose logs -f</p>
+                <p><strong>🔍 Test DB:</strong> docker-compose exec postgres psql -U testuser -d testdb</p>
+                <p><strong>⏹ Stop:</strong> docker-compose down</p>
+            </div>
+            <p style="margin-top: 2rem; font-size: 1.1rem;">
+                ✨ <strong>Volgende stap:</strong> Vervang deze test containers met echte applicaties<br>
+                (Spring Boot backend, React frontend, Python AI services)
+            </p>
+        </div>
+    </div>
+</body>
+</html>
